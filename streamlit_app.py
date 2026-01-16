@@ -38,16 +38,17 @@ except Exception as e:
     st.error(f"⚠️ SYSTEM ERROR: {e}")
     st.stop()
 
-# ================= 📡 3. 数据层：Polymarket 智能抓取 (V3.0) =================
+# ================= 📡 3. 数据层：Polymarket 智能抓取 (V4.0 修正版) =================
 
 @st.cache_data(ttl=300) 
 def fetch_top_markets():
     """
-    终极修复版 V3.0: 
-    1. 遍历 Event 下的所有 Market，找出成交量最大的那个 '主力合约'。
-    2. 解决 0.0% 问题。
+    V4.0 修正逻辑:
+    1. limit=100 (恢复完整监控)
+    2. 严格排除 closed=True 的过期合约，解决 'Price: 0.0%' 问题
     """
-    url = "https://gamma-api.polymarket.com/events?limit=50&active=true&closed=false&sort=volume"
+    # 🔴 关键修正1: limit=100
+    url = "https://gamma-api.polymarket.com/events?limit=100&active=true&closed=false&sort=volume"
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -65,14 +66,17 @@ def fetch_top_markets():
                 if not all_markets:
                     continue
 
-                # 🌟 核心修复逻辑：寻找“主力合约”
-                # 很多 Event 包含多个 Market，我们要找 volume 最大的那个，而不是默认第一个
+                # 🌟 核心修复逻辑：寻找“正在交易”的主力合约
                 best_market = None
                 max_volume = -1
                 
                 for m in all_markets:
+                    # 🔴 关键修正2: 跳过已关闭(Closed)的子市场
+                    # 很多 0.0% 的原因就是因为抓到了已过期的旧合约
+                    if m.get('closed') is True:
+                        continue
+                        
                     try:
-                        # 尝试获取该 market 的 volume，如果没有则默认为 0
                         vol = float(m.get('volume', 0))
                         if vol > max_volume:
                             max_volume = vol
@@ -80,30 +84,25 @@ def fetch_top_markets():
                     except:
                         continue
                 
-                # 如果没找到 volume 信息，就兜底用第一个
+                # 兜底：如果所有子市场都关了（不太可能），才勉强取第一个
                 if not best_market:
                     best_market = all_markets[0]
 
                 # 解析价格
                 price_str = "N/A"
                 try:
-                    # 获取 outcomePrices (可能是字符串或列表)
                     raw_prices = best_market.get('outcomePrices', [])
                     if isinstance(raw_prices, str):
                         prices = json.loads(raw_prices)
                     else:
                         prices = raw_prices
                     
-                    # 取第一个非零价格，或者默认取第一个
                     if prices and len(prices) > 0:
                         val = float(prices[0])
-                        # 如果是 binary (Yes/No)，通常我们想看 Yes 的价格
-                        # 有些市场 index 0 是 Yes，有些是 No。简单起见，我们展示最大的那个概率（代表胜率较高的一方）
-                        # 或者为了直观，直接展示 val
                         
-                        # 格式化：去除 0.0% 的尴尬情况
+                        # 格式化显示
                         if val == 0:
-                            price_str = "Wait..." # 还没开盘或流动性极差
+                            price_str = "0.0%" # 真实为0
                         elif val < 0.01:
                             price_str = "<1%"
                         else:
@@ -119,7 +118,6 @@ def fetch_top_markets():
             return markets_clean
         return []
     except Exception as e:
-        print(f"Error: {e}")
         return []
 
 # ================= 🧠 4. 智能层：Gemini 2.5 引擎 =================
@@ -129,8 +127,8 @@ def ignite_prometheus(user_news, market_list, key):
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # 截取前 30 个给 AI，保证速度
-        markets_text = "\n".join([f"- ID:{i} | {m['title']} (Price: {m['price']})" for i, m in enumerate(market_list[:30])])
+        # 截取前 40 个最热市场发给 AI (Token 优化)
+        markets_text = "\n".join([f"- ID:{i} | {m['title']} (Price: {m['price']})" for i, m in enumerate(market_list[:40])])
         
         prompt = f"""
         角色: Prometheus (Polymarket Alpha Hunter).
@@ -174,8 +172,9 @@ with st.sidebar:
         top_markets = fetch_top_markets()
     
     if top_markets:
+        # 显示实际监控数量
         st.info(f"已连接: 监控 {len(top_markets)} 个热门市场")
-        # 滚动展示前5个，方便你确认价格是否修复
+        # 滚动展示前5个
         for m in top_markets[:5]:
             st.caption(f"📈 {m['title']}")
             st.code(f"Price: {m['price']}")
