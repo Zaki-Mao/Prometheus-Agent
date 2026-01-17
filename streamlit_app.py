@@ -4,7 +4,7 @@ import json
 import google.generativeai as genai
 import os
 
-# ================= 🕵️‍♂️ 1. 基础配置 (Be Holmes 终极版) =================
+# ================= 🕵️‍♂️ 1. 基础配置 (Be Holmes V5.0) =================
 st.set_page_config(
     page_title="Be Holmes | AI Market Detective",
     page_icon="🕵️‍♂️",
@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 注入 CSS：英伦侦探暗黑风格 (Gold & Charcoal) - V4.0 UI 修复版
+# 注入 CSS：英伦侦探暗黑风格 (Gold & Charcoal)
 st.markdown("""
 <style>
     /* 全局背景 */
@@ -33,7 +33,7 @@ st.markdown("""
     .stTextArea textarea { background-color: #151515; color: #D4AF37; border: 1px solid #444; }
     .stTextArea textarea:focus { border: 1px solid #D4AF37; box-shadow: 0 0 10px rgba(212, 175, 55, 0.2); }
     
-    /* 按钮样式优化 (Investigations 按钮) */
+    /* 按钮样式优化 */
     div.stButton > button { 
         background-color: #000; color: #D4AF37; border: 1px solid #D4AF37; 
         transition: all 0.3s ease;
@@ -45,14 +45,14 @@ st.markdown("""
     /* 去掉链接下划线 */
     a { text-decoration: none !important; border-bottom: none !important; }
     
-    /* 底部执行按钮专属样式 (V4.0 新增) */
+    /* 底部执行按钮专属样式 */
     .execute-btn {
-        background: linear-gradient(45deg, #D4AF37, #FFD700); /* 渐变金 */
+        background: linear-gradient(45deg, #D4AF37, #FFD700);
         border: none;
-        color: #000; /* 黑色文字 */
+        color: #000;
         width: 100%;
         padding: 15px;
-        font-weight: 800; /* 极粗 */
+        font-weight: 800;
         font-size: 16px;
         cursor: pointer;
         border-radius: 4px;
@@ -79,11 +79,11 @@ except Exception as e:
     st.error(f"⚠️ SYSTEM ERROR: {e}")
     st.stop()
 
-# ================= 📡 3. 数据层：Polymarket (V4.0 稳定版) =================
+# ================= 📡 3. 数据层：Polymarket (V5.0 双边赔率增强版) =================
 @st.cache_data(ttl=300) 
 def fetch_top_markets():
     """
-    获取 Polymarket 上的活跃市场数据
+    获取 Polymarket 数据，并解析出完整的 Yes/No 赔率
     """
     url = "https://gamma-api.polymarket.com/events?limit=100&active=true&closed=false&sort=volume"
     try:
@@ -103,45 +103,48 @@ def fetch_top_markets():
                 if not all_markets:
                     continue
 
+                # 找到成交量最大的 Market
                 best_market = None
                 max_volume = -1
-                
                 for m in all_markets:
-                    if m.get('closed') is True:
-                        continue    
+                    if m.get('closed') is True: continue    
                     try:
                         vol = float(m.get('volume', 0))
                         if vol > max_volume:
                             max_volume = vol
                             best_market = m
-                    except:
-                        continue
+                    except: continue
                 
-                if not best_market:
-                    best_market = all_markets[0]
+                if not best_market: best_market = all_markets[0]
 
-                price_str = "N/A"
+                # === V5.0 新增: 解析所有结果的赔率 (Yes/No) ===
+                odds_display = "N/A"
                 try:
-                    raw_prices = best_market.get('outcomePrices', [])
-                    if isinstance(raw_prices, str):
-                        prices = json.loads(raw_prices)
-                    else:
-                        prices = raw_prices
+                    # 获取结果名称 (如 ["Yes", "No"])
+                    raw_outcomes = best_market.get('outcomes', '["Yes", "No"]')
+                    outcomes = json.loads(raw_outcomes) if isinstance(raw_outcomes, str) else raw_outcomes
                     
-                    if prices and len(prices) > 0:
-                        val = float(prices[0])
-                        if val == 0:
-                            price_str = "0.0%" 
-                        elif val < 0.01:
-                            price_str = "<1%"
-                        else:
-                            price_str = f"{val * 100:.1f}%"
+                    # 获取结果价格 (如 ["0.22", "0.78"])
+                    raw_prices = best_market.get('outcomePrices', '[]')
+                    prices = json.loads(raw_prices) if isinstance(raw_prices, str) else raw_prices
+
+                    # 拼接成字符串 "Yes: 22.0% | No: 78.0%"
+                    odds_list = []
+                    if prices and len(prices) == len(outcomes):
+                        for o, p in zip(outcomes, prices):
+                            val = float(p) * 100
+                            odds_list.append(f"{o}: {val:.1f}%")
+                        odds_display = " | ".join(odds_list)
+                    else:
+                        # 兜底逻辑
+                        val = float(prices[0]) * 100
+                        odds_display = f"Price: {val:.1f}%"
                 except:
-                    price_str = "N/A"
+                    odds_display = "Odds Unavailable"
                 
                 markets_clean.append({
                     "title": title,
-                    "price": price_str,
+                    "odds": odds_display, # 这里存的是详细的 "Yes: xx | No: xx"
                     "slug": slug
                 })
             return markets_clean
@@ -149,57 +152,58 @@ def fetch_top_markets():
     except Exception as e:
         return []
 
-# ================= 🧠 4. 智能层：Be Holmes 深度长文推理引擎 (V4.1 修复版) =================
+# ================= 🧠 4. 智能层：Be Holmes 深度推理引擎 (V5.0 Live Ticker) =================
 
 def consult_holmes(user_evidence, market_list, key):
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # 限制市场数量
-        markets_text = "\n".join([f"- ID:{i} | {m['title']} (Current Odds: {m['price']})" for i, m in enumerate(market_list[:40])])
+        # 将详细的赔率数据传给 AI
+        markets_text = "\n".join([f"- ID:{i} | {m['title']} [Live Odds: {m['odds']}]" for i, m in enumerate(market_list[:40])])
         
         prompt = f"""
         Role: You are **Be Holmes**, a legendary prediction market detective. 
-        Your clients pay you for **deep, comprehensive, and exhaustive analysis**, not quick summaries.
-        You must write detailed logical deductions that reveal the "Why" behind the probability.
+        Your goal is to find Alpha by connecting news to market mispricing.
 
-        Task: Analyze the [Evidence] against the [Market List] to find Alpha.
+        Task: Analyze the [Evidence] against the [Market List].
 
         [Evidence]: "{user_evidence}"
         [Market Data]: {markets_text}
 
         **LANGUAGE PROTOCOL:**
-        - Input Chinese -> Output CHINESE (Traditional/Simplified based on input).
-        - Input English -> Output ENGLISH.
+        - Input Chinese -> Output CHINESE report.
+        - Input English -> Output ENGLISH report.
 
-        **ANALYSIS REQUIREMENTS (DEEP DIVE):**
-        1. **Go Deep:** Do not be brief. For the "Logic" section, write a comprehensive paragraph (approx 100-150 words) explaining the causal chain.
-        2. **Connect the Dots:** Explicitly link the specific keywords in the news to the specific settlement rules of the market.
-        3. **No Footer:** Do not output any conversational text like "My investigation found..." at the end. Only output the Cards.
+        **ANALYSIS REQUIREMENTS:**
+        1. **Deep Logic:** Write a comprehensive paragraph (100+ words) for the "Deduction" section. Explain the causal mechanism.
+        2. **Real-time Ticker:** You MUST display the current odds (Yes/No) clearly in the report header.
 
         **OUTPUT FORMAT (Markdown Cards):**
 
         ---
         ### 🕵️‍♂️ Case File: [Exact Market Title]
         
-        **1. 📊 The Verdict (结论)**
-        - **Signal:** 🟢 STRONG BUY / 🔴 STRONG SELL / ⚠️ WAIT
-        - **Confidence:** **[0-100]%** (Explain briefly why)
-        - **Odds Gap:** Market [Current %] ➔ Target [Your Predicted %]
+        **📊 Market Ticker (实时盘口)**
+        > **[Insert Real-time Odds Here]** (e.g., "Yes: 22.5% | No: 77.5%")
+        
+        **1. ⚖️ The Verdict (结论)**
+        - **Signal:** 🟢 STRONG BUY / 🔴 STRONG SELL / ⚠️ WATCH
+        - **Confidence:** **[0-100]%**
+        - **Target:** Market is roughly [Current %], I predict [Your %].
         
         **2. ⛓️ The Deduction (深度逻辑链)**
-        > *[Mandatory: Write a detailed analytical paragraph here. Start with the raw evidence, then explain the transmission mechanism (how this affects voter/market psychology), and finally conclude why the current price is wrong. Be thorough and professional.]*
+        > *[Mandatory: Detailed analysis paragraph. Start with facts, explain the impact on settlement rules, and conclude why the price is wrong.]*
         
         **3. ⏳ Execution (执行计划)**
-        - **Timeframe:** [e.g., "Hold for 48h" / "Long term until Q3"]
-        - **Exit Strategy:** [e.g., "Sell if odds hit 60%" or "Stop loss if official denial is issued"]
+        - **Timeframe:** [Duration]
+        - **Exit:** [Condition]
         ---
         """
         
         response = model.generate_content(prompt)
         
-        # 修复：移除所有缩进，确保顶格书写，防止被识别为代码块
+        # V5.0: 保持顶格无缩进的 HTML 按钮
         btn_html = """
 <br>
 <a href='https://polymarket.com/' target='_blank' style='text-decoration:none;'>
@@ -211,10 +215,9 @@ def consult_holmes(user_evidence, market_list, key):
     except Exception as e:
         return f"❌ Deduction Error: {str(e)}"
 
-# ================= 🖥️ 5. 前端交互层 (UI V4.0) =================
+# ================= 🖥️ 5. 前端交互层 (UI V5.0) =================
 
 with st.sidebar:
-    # 侧边栏
     st.markdown("## 💼 DETECTIVE'S TOOLKIT")
     st.markdown("`ENGINE: GEMINI-2.5-FLASH`")
     st.success("🔒 Authorization: Granted")
@@ -222,14 +225,14 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 🔍 Market Surveillance")
     
-    with st.spinner("Gathering intel..."):
+    with st.spinner("Scanning real-time tickers..."):
         top_markets = fetch_top_markets()
     
     if top_markets:
         st.info(f"Monitoring {len(top_markets)} Active Cases")
         for m in top_markets[:5]:
             st.caption(f"📅 {m['title']}")
-            st.code(f"Odds: {m['price']}")
+            st.code(f"{m['odds']}") # 侧边栏也显示详细赔率
     else:
         st.error("⚠️ Network Glitch: Data Unavailable")
 
@@ -241,7 +244,6 @@ st.markdown("---")
 col1, col2 = st.columns([3, 1])
 with col1:
     st.markdown("### 📁 EVIDENCE LOCKER")
-    # 输入框
     user_news = st.text_area(
         "News", 
         height=150, 
@@ -251,7 +253,6 @@ with col1:
 
 with col2:
     st.markdown("<br><br>", unsafe_allow_html=True)
-    # 调查按钮
     ignite_btn = st.button("🔍 INVESTIGATE", use_container_width=True)
 
 if ignite_btn:
@@ -260,10 +261,8 @@ if ignite_btn:
     elif not top_markets:
         st.error("⚠️ Market data unavailable.")
     else:
-        with st.spinner(">> Deducing outcomes... (Deep Analysis)"):
+        with st.spinner(">> Analyzing real-time odds & causality..."):
             result = consult_holmes(user_news, top_markets, api_key)
             st.markdown("---")
             st.markdown("### 📝 INVESTIGATION REPORT")
-            # 渲染结果（允许 HTML 以显示自定义按钮）
             st.markdown(result, unsafe_allow_html=True)
-
