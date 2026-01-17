@@ -183,7 +183,7 @@ def consult_holmes(user_evidence, market_list, key):
         ### 🕵️‍♂️ Case File: [Exact Market Title]
         
         <div class="ticker-box">
-        📡 LIVE SNAPSHOT: [Insert Odds Here, e.g., Yes: 22.5% | No: 77.5%]
+        📡 SNAPSHOT: [Insert Odds Here, e.g., Yes: 22.5% | No: 77.5%]
         </div>
         
         **1. ⚖️ The Verdict (结论)**
@@ -282,4 +282,5 @@ if ignite_btn:
             st.markdown("---")
             st.markdown("### 📝 INVESTIGATION REPORT")
             st.markdown(result, unsafe_allow_html=True)
+
 
