@@ -56,7 +56,6 @@ st.markdown("""
     /* --- Buttons --- */
     .stButton button { width: 100%; border-radius: 6px; font-weight: bold; transition: all 0.3s ease; }
     
-    /* Investigate Button (Red) */
     div[data-testid="column"]:nth-of-type(1) div.stButton > button { 
         background: linear-gradient(90deg, #8B0000, #FF4500); 
         color: #FFF; border: none; box-shadow: 0 4px 15px rgba(255, 69, 0, 0.3);
@@ -65,7 +64,6 @@ st.markdown("""
         box-shadow: 0 6px 25px rgba(255, 69, 0, 0.6); transform: translateY(-2px);
     }
 
-    /* Manual Button (Ghost) */
     div[data-testid="column"]:nth-of-type(2) div.stButton > button { 
         background-color: transparent; color: #666; border: 1px solid #333; 
     }
@@ -91,16 +89,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 🔐 3. SECURITY LAYER =================
-try:
-    if "GEMINI_KEY" in st.secrets:
-        api_key = st.secrets["GEMINI_KEY"]
-    else:
-        st.error("⚠️ KEY ERROR: Please configure .streamlit/secrets.toml")
-        st.stop()
-except Exception as e:
-    st.error(f"⚠️ SYSTEM ERROR: {e}")
-    st.stop()
+# ================= 🔐 3. KEY MANAGEMENT (BYOK Logic) =================
+# Logic moved to Sidebar section below for better UX flow
+active_key = None
 
 # ================= 📡 4. DATA ENGINE (DEEP SONAR) =================
 
@@ -166,7 +157,7 @@ def extract_keywords_with_ai(user_text, key):
         return response.text.strip()
     except: return None
 
-# ================= 🧠 5. INTELLIGENCE LAYER (The Expert) =================
+# ================= 🧠 5. INTELLIGENCE LAYER =================
 
 def consult_holmes(user_evidence, market_list, key):
     try:
@@ -211,7 +202,6 @@ def consult_holmes(user_evidence, market_list, key):
         """
         response = model.generate_content(prompt)
         
-        # --- FIX: Removed indentation to prevent Markdown code block rendering ---
         btn_html = """
 <br>
 <a href='https://polymarket.com/' target='_blank' style='text-decoration:none;'>
@@ -261,11 +251,27 @@ def open_manual():
 
 # ================= 🖥️ 7. MAIN INTERFACE =================
 
-# --- Sidebar ---
+# --- Sidebar (With BYOK Logic) ---
 with st.sidebar:
     st.markdown("## 💼 DETECTIVE'S TOOLKIT")
-    st.markdown("`CORE: GEMINI-2.5-FLASH`")
-    st.success("🔒 System: Online")
+    
+    # --- 🔐 BYOK Module ---
+    with st.expander("🔑 API Key Settings", expanded=False):
+        st.caption("Rate limited? Enter your own Google AI Key.")
+        user_api_key = st.text_input("Gemini Key", type="password")
+        st.markdown("[Get Free Key](https://aistudio.google.com/app/apikey)")
+
+    # Key Logic
+    if user_api_key:
+        active_key = user_api_key
+        st.success("🔓 User Key Active")
+    elif "GEMINI_KEY" in st.secrets:
+        active_key = st.secrets["GEMINI_KEY"]
+        st.info("🔒 System Key Active")
+    else:
+        st.error("⚠️ No API Key found!")
+        st.stop()
+
     st.markdown("---")
     st.markdown("### 🌊 Market Sonar (Top 5)")
     with st.spinner("Initializing Sonar..."):
@@ -297,17 +303,17 @@ with col_btn_main:
 with col_btn_help:
     help_btn = st.button("📘 Manual", use_container_width=True)
 
-# 3. Logic Trigger
 if help_btn: open_manual()
 
 if ignite_btn:
     if not user_news:
         st.warning("⚠️ Evidence required to initiate investigation.")
     else:
-        # --- LOGIC: DEEP SONAR & ANALYSIS ---
+        # --- LOGIC ---
         with st.status("🚀 Initiating Deep Scan...", expanded=True) as status:
             st.write("🧠 Extracting semantic keywords (Gemini 2.5)...")
-            search_keywords = extract_keywords_with_ai(user_news, api_key)
+            # Use active_key (User's or System's)
+            search_keywords = extract_keywords_with_ai(user_news, active_key)
             
             sonar_markets = []
             if search_keywords:
@@ -327,7 +333,8 @@ if ignite_btn:
         if not unique_markets: st.error("⚠️ No relevant markets found in the database.")
         else:
             with st.spinner(">> Deducing Alpha..."):
-                result = consult_holmes(user_news, unique_markets, api_key)
+                # Use active_key (User's or System's)
+                result = consult_holmes(user_news, unique_markets, active_key)
                 st.markdown("---")
                 st.markdown("### 📝 INVESTIGATION REPORT")
                 st.markdown(result, unsafe_allow_html=True)
