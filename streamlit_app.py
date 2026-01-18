@@ -92,10 +92,10 @@ st.markdown("""
 # ================= 🔐 3. KEY MANAGEMENT =================
 active_key = None
 
-# ================= 📡 4. DATA ENGINE (FIXED) =================
+# ================= 📡 4. DATA ENGINE (DRAGNET SEARCH V13.0) =================
 
 def detect_language_type(text):
-    """Simple detector: if text contains Chinese characters, return 'Chinese'"""
+    """如果包含中文字符，返回 'CHINESE'，否则 'ENGLISH'"""
     for char in text:
         if '\u4e00' <= char <= '\u9fff':
             return "CHINESE"
@@ -147,37 +147,62 @@ def fetch_top_markets():
         return parse_market_data(response.json()) if response.status_code == 200 else []
     except: return []
 
-def deep_sonar_search(keyword):
-    if not keyword: return []
-    try:
-        # 🔥 FIX: Limit increased to 100 to find niche markets (like SpaceX IPO)
-        response = requests.get(f"https://gamma-api.polymarket.com/events?limit=100&active=true&closed=false&q={keyword}", headers={"User-Agent": "BeHolmes/1.0"}, timeout=8)
-        return parse_market_data(response.json()) if response.status_code == 200 else []
-    except: return []
+def dragnet_search(keywords_list):
+    """
+    🔥 拖网搜索逻辑：
+    接受一个关键词列表（如 ['SpaceX', 'Musk', 'IPO']），
+    并发起多次搜索，将结果合并去重。
+    """
+    all_results = []
+    seen_slugs = set()
+    
+    # 遍历每个关键词进行搜索
+    for kw in keywords_list:
+        if not kw: continue
+        try:
+            # 这里的 limit 放宽到 50，如果搜3个词，就是 150 个结果的池子
+            url = f"https://gamma-api.polymarket.com/events?limit=50&active=true&closed=false&q={kw}"
+            response = requests.get(url, headers={"User-Agent": "BeHolmes/1.0"}, timeout=5)
+            if response.status_code == 200:
+                data = parse_market_data(response.json())
+                for m in data:
+                    if m['slug'] not in seen_slugs:
+                        all_results.append(m)
+                        seen_slugs.add(m['slug'])
+        except: continue
+        
+    return all_results
 
-def extract_keywords_with_ai(user_text, key):
-    if not user_text: return None
+def extract_search_terms_ai(user_text, key):
+    """
+    🔥 裂变提取器：
+    让 AI 把用户的一句话，拆解成 2-3 个独立的搜索关键词。
+    例如 "马斯克SpaceX IPO" -> ["SpaceX IPO", "SpaceX", "Elon Musk"]
+    """
+    if not user_text: return []
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
-        # 🔥 FIX: Force translation of Chinese input to English keywords for Polymarket API
-        prompt = f"""
-        Task: Convert the input text into a specific English search query for the Polymarket database.
         
-        Rules:
-        1. Ignore conversational filler.
-        2. Identify the core 'Entity' + 'Event'.
-        3. OUTPUT ONLY THE ENGLISH KEYWORD.
+        prompt = f"""
+        Task: Break down the input text into 2-3 distinct English search keywords for a database.
+        
+        Strategy:
+        1. Keyword 1: The most specific phrase (e.g., "SpaceX IPO").
+        2. Keyword 2: The main entity (e.g., "SpaceX").
+        3. Keyword 3: Related entity (e.g., "Elon Musk").
         
         Input: "{user_text}"
-        Example Input: "马斯克的SpaceX要上市了吗" -> Output: "SpaceX IPO"
-        Example Input: "Will Trump deport people?" -> Output: "Trump deport"
         
-        Your Output:
+        Output format: Keyword1, Keyword2, Keyword3
+        (Just comma separated, nothing else)
         """
         response = model.generate_content(prompt)
-        return response.text.strip()
-    except: return None
+        # 清洗结果，转成列表
+        raw_text = response.text.strip()
+        keywords = [k.strip() for k in raw_text.split(',')]
+        return keywords[:3] # 最多取前3个
+    except: return []
 
 # ================= 🧠 5. INTELLIGENCE LAYER (The Expert) =================
 
@@ -186,26 +211,32 @@ def consult_holmes(user_evidence, market_list, key):
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # Scan 100 items to find the needle in the haystack
-        markets_text = "\n".join([f"- {m['title']} [Odds: {m['odds']}]" for m in market_list[:100]])
+        # 将搜索到的结果（最多前 80 个，防止 Token 溢出）喂给 AI
+        # 这次因为是拖网搜索，相关度高的可能性更大
+        markets_text = "\n".join([f"- {m['title']} [Odds: {m['odds']}]" for m in market_list[:80]])
         
-        # 🔥 FIX: Strict Python-side language detection
+        # 🔥 强制语言检测
         target_language = detect_language_type(user_evidence)
         
         prompt = f"""
         Role: You are **Be Holmes**, a Senior Hedge Fund Strategist.
         
         [User Input]: "{user_evidence}"
-        [Market Data]: 
+        [Market Data Scan (from Dragnet Search)]: 
         {markets_text}
 
         **MANDATORY INSTRUCTION:**
-        **You MUST write the entire report in {target_language}.**
-        If {target_language} is CHINESE, use Simplified Chinese (简体中文).
-        
-        **ANALYSIS PROTOCOL:**
-        1. **Exact Match First:** Scan the list for the specific event mentioned (e.g., if input is "SpaceX IPO", find the "SpaceX IPO" market). Do NOT settle for a related company (like Tesla) unless the exact market is truly missing.
-        2. **Correlation Logic:** If the specific market exists, analyze IT. If not, explicitly state "Direct market not found" and analyze the closest proxy.
+        **1. LANGUAGE:** You MUST write the entire report in **{target_language}**.
+           - If {target_language} is CHINESE, output Simplified Chinese.
+           - NO English output allowed unless input is English.
+
+        **2. MATCHING LOGIC (CRITICAL):**
+        - Your #1 priority is to find the **EXACT** market mentioned.
+        - **Scanning Protocol:**
+          - Look for "SpaceX" in the titles.
+          - Look for "IPO" in the titles.
+          - If you see "Will SpaceX IPO in 2025?", THAT is the target.
+        - **Anti-Hallucination:** Do NOT analyze "Kraken" or "Tesla" if the user asked about "SpaceX", unless the SpaceX market is absolutely zero. If zero, say "Target market not found" clearly.
         
         **OUTPUT FORMAT (Strict Markdown):**
         
@@ -334,17 +365,19 @@ if ignite_btn:
     if not user_news:
         st.warning("⚠️ Evidence required to initiate investigation.")
     else:
-        with st.status("🚀 Initiating Deep Scan...", expanded=True) as status:
-            st.write("🧠 Extracting semantic keywords (Gemini 2.5)...")
-            search_keywords = extract_keywords_with_ai(user_news, active_key)
+        with st.status("🚀 Initiating Dragnet Search...", expanded=True) as status:
+            st.write("🧠 Fissioning keywords (Gemini 2.5)...")
+            # 1. 裂变出多个关键词
+            search_terms = extract_search_terms_ai(user_news, active_key)
             
             sonar_markets = []
-            if search_keywords:
-                st.write(f"🌊 Active Sonar Ping: '{search_keywords}'...")
-                # Search increased to limit=100
-                sonar_markets = deep_sonar_search(search_keywords)
-                st.write(f"✅ Found {len(sonar_markets)} specific markets in deep storage.")
+            if search_terms:
+                st.write(f"🌊 Dragnet deployed: {search_terms}...")
+                # 2. 拖网搜索（多次请求合并）
+                sonar_markets = dragnet_search(search_terms)
+                st.write(f"✅ Caught {len(sonar_markets)} potential markets in the net.")
             
+            # 3. 合并数据
             combined_markets = sonar_markets + top_markets
             seen_slugs = set()
             unique_markets = []
