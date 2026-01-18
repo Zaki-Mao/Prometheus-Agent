@@ -4,7 +4,7 @@ import json
 import google.generativeai as genai
 import time
 
-# ================= 🕵️‍♂️ 1. 基础配置 =================
+# ================= 🕵️‍♂️ 1. SYSTEM CONFIGURATION =================
 st.set_page_config(
     page_title="Be Holmes | Alpha Hunter",
     page_icon="🕵️‍♂️",
@@ -12,44 +12,44 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ================= 🎨 2. 五行风水 UI (Magma Red - Pure Edition) =================
+# ================= 🎨 2. UI DESIGN (Magma Red - Professional) =================
 st.markdown("""
 <style>
-    /* --- 全局背景：深邃黑 --- */
+    /* --- Global Background: Void Black --- */
     .stApp { background-color: #050505; font-family: 'Roboto Mono', monospace; }
     [data-testid="stSidebar"] { background-color: #000000; border-right: 1px solid #1a1a1a; }
     
-    /* --- 标题：熔岩渐变 (Fire Logic) --- */
+    /* --- Typography: Magma Gradient --- */
     h1 { 
-        background: linear-gradient(90deg, #FF4500, #E63946); /* 橙红到深红 */
+        background: linear-gradient(90deg, #FF4500, #E63946); 
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         font-family: 'Georgia', serif; 
         font-weight: 800;
         border-bottom: 2px solid #331111; 
         padding-bottom: 15px;
-        text-shadow: 0 0 20px rgba(255, 69, 0, 0.3);
+        text-shadow: 0 0 20px rgba(255, 69, 0, 0.2);
     }
     
-    /* --- 文本色调 --- */
-    h3 { color: #FF7F50 !important; } /* 珊瑚红副标题 */
+    /* --- Text Colors --- */
+    h3 { color: #FF7F50 !important; } 
     p, label, .stMarkdown, .stText, li, div, span { color: #A0A0A0 !important; }
     strong { color: #FFF !important; font-weight: 600; } 
     a { text-decoration: none !important; border-bottom: none !important; }
 
-    /* --- 输入框：黑红科技感 --- */
+    /* --- Input Fields: High Contrast --- */
     .stTextArea textarea, .stNumberInput input, .stTextInput input, .stSelectbox div[data-baseweb="select"] { 
         background-color: #0A0A0A !important; 
-        color: #E63946 !important; /* 文字也是红色 */
+        color: #E63946 !important; 
         border: 1px solid #333 !important; 
-        border-radius: 8px;
+        border-radius: 6px;
     }
     .stTextArea textarea:focus, .stTextInput input:focus { 
         border: 1px solid #FF4500 !important; 
         box-shadow: 0 0 15px rgba(255, 69, 0, 0.2); 
     }
     
-    /* --- 按钮样式统一 --- */
+    /* --- Button Styles --- */
     .stButton button {
         width: 100%;
         border-radius: 6px;
@@ -57,7 +57,7 @@ st.markdown("""
         transition: all 0.3s ease;
     }
     
-    /* 针对第一个按钮 (调查) - 红色实心 */
+    /* Primary Action Button (Red) */
     div[data-testid="column"]:nth-of-type(1) div.stButton > button { 
         background: linear-gradient(90deg, #8B0000, #FF4500); 
         color: #FFF; 
@@ -69,11 +69,11 @@ st.markdown("""
         transform: translateY(-2px);
     }
 
-    /* 针对第二个按钮 (说明书) - 幽灵边框模式 */
+    /* Secondary Button (Ghost) */
     div[data-testid="column"]:nth-of-type(2) div.stButton > button { 
         background-color: transparent; 
-        color: #888; 
-        border: 1px solid #444; 
+        color: #666; 
+        border: 1px solid #333; 
     }
     div[data-testid="column"]:nth-of-type(2) div.stButton > button:hover { 
         border-color: #FF4500;
@@ -81,7 +81,7 @@ st.markdown("""
         background-color: #1a0505;
     }
 
-    /* --- 报告中的执行按钮 (Action) --- */
+    /* --- Report: Execution Button --- */
     .execute-btn {
         background: linear-gradient(90deg, #FF4500, #FFD700); 
         border: none;
@@ -99,11 +99,11 @@ st.markdown("""
     }
     .execute-btn:hover { transform: scale(1.02); box-shadow: 0 8px 25px rgba(255, 69, 0, 0.5); }
 
-    /* --- 实时盘口框 (HUD) --- */
+    /* --- Report: Live Ticker HUD --- */
     .ticker-box {
         background-color: #080808;
         border: 1px solid #222;
-        border-left: 4px solid #FF4500; /* 红线 */
+        border-left: 4px solid #FF4500;
         color: #FF4500;
         font-family: 'Courier New', monospace;
         padding: 15px;
@@ -116,7 +116,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 🔐 3. 安全层 =================
+# ================= 🔐 3. SECURITY LAYER =================
 try:
     if "GEMINI_KEY" in st.secrets:
         api_key = st.secrets["GEMINI_KEY"]
@@ -127,9 +127,10 @@ except Exception as e:
     st.error(f"⚠️ SYSTEM ERROR: {e}")
     st.stop()
 
-# ================= 📡 4. 深海声纳系统 (Data Engine) =================
+# ================= 📡 4. DATA ENGINE (DEEP SONAR) =================
 
 def parse_market_data(data):
+    """Parses raw API JSON into clean market objects."""
     markets_clean = []
     if not data: return []
     for event in data:
@@ -138,6 +139,7 @@ def parse_market_data(data):
         all_markets = event.get('markets', [])
         if not all_markets: continue
 
+        # Find liquid market
         best_market = None
         max_volume = -1
         for m in all_markets:
@@ -149,6 +151,7 @@ def parse_market_data(data):
         
         if not best_market: best_market = all_markets[0]
 
+        # Parse Odds
         odds_display = "N/A"
         try:
             raw_outcomes = best_market.get('outcomes', '["Yes", "No"]')
@@ -170,28 +173,33 @@ def parse_market_data(data):
 
 @st.cache_data(ttl=300) 
 def fetch_top_markets():
+    """Baseline: Fetch top volume markets."""
     try:
         response = requests.get("https://gamma-api.polymarket.com/events?limit=50&active=true&closed=false&sort=volume", headers={"User-Agent": "BeHolmes/1.0"}, timeout=5)
         return parse_market_data(response.json()) if response.status_code == 200 else []
     except: return []
 
 def deep_sonar_search(keyword):
+    """Active Sonar: Search entire database by keyword."""
     if not keyword: return []
     try:
+        # 'q' parameter searches title, description, and tags
         response = requests.get(f"https://gamma-api.polymarket.com/events?limit=20&active=true&closed=false&q={keyword}", headers={"User-Agent": "BeHolmes/1.0"}, timeout=5)
         return parse_market_data(response.json()) if response.status_code == 200 else []
     except: return []
 
 def extract_keywords_with_ai(user_text, key):
+    """Uses Gemini to distill user input into search queries."""
     if not user_text: return None
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(f"Extract 1-2 most important English keywords for search. Text: '{user_text}'. Output format: keyword1 keyword2")
+        # Prompt to extract English keywords regardless of input language
+        response = model.generate_content(f"Extract 1-2 most important English keywords for a search engine from this text. Text: '{user_text}'. Output strictly format: keyword1 keyword2")
         return response.text.strip()
     except: return None
 
-# ================= 🧠 5. 推理引擎 =================
+# ================= 🧠 5. INTELLIGENCE LAYER (The Expert) =================
 
 def consult_holmes(user_evidence, market_list, key):
     try:
@@ -200,83 +208,97 @@ def consult_holmes(user_evidence, market_list, key):
         markets_text = "\n".join([f"- {m['title']} [Odds: {m['odds']}]" for m in market_list[:50]])
         
         prompt = f"""
-        Role: **Be Holmes**, The Prediction Market Detective.
-        Goal: Find Alpha by connecting news to market odds.
-        
-        [Evidence]: "{user_evidence}"
-        [Available Markets]: 
+        Role: You are **Be Holmes**, an omniscient financial intelligence agent specializing in prediction markets.
+        Your goal is to perform a deep-dive analysis, connecting news events to market probabilities with surgical precision.
+
+        [Evidence / Lead]: "{user_evidence}"
+        [Market Data Scan]: 
         {markets_text}
 
-        **LANGUAGE PROTOCOL:**
-        - Input Chinese -> Output CHINESE report.
-        - Input English -> Output ENGLISH report.
+        **PROTOCOL:**
+        1. **Language Detection:** - IF input is Chinese -> Output strictly in CHINESE.
+           - ELSE -> Output strictly in ENGLISH.
+        
+        2. **Analysis Framework:**
+           - Identify the specific market closest to the evidence.
+           - Analyze the "Probability Gap": Difference between market odds and actual event probability.
+           - Provide a clear Trading Strategy (Buy/Sell/Hold) with specific entry/exit points.
 
-        **OUTPUT FORMAT (Strict HTML/Markdown):**
+        **OUTPUT FORMAT (Strict Markdown):**
         
         ---
-        ### 🕵️‍♂️ Case File: [Most Relevant Market Title]
+        ### 🕵️‍♂️ Case File: [Exact Market Title]
         
         <div class="ticker-box">
-        🔥 LIVE SIGNAL: [Insert Odds Here]
+        🔥 LIVE SNAPSHOT: [Insert Live Odds Here]
         </div>
         
-        **1. ⚖️ The Verdict (结论)**
-        - **Signal:** 🔴 STRONG BUY / 🧊 AVOID / 🌲 LONG HOLD
-        - **Confidence:** **[0-100]%**
-        - **Prediction:** Market implies [Current %], I calculate [Target %].
+        **1. ⚖️ The Verdict**
+        - **Signal:** 🟢 STRONG BUY / 🔴 SELL / ⚠️ WATCH
+        - **Confidence Score:** **[0-100]%**
+        - **Suggested Holding Period:** [e.g., Intraday, 48 Hours, Until Official Filing]
         
-        **2. ⛓️ The Deduction (因果推理)**
-        > *[Mandatory: Write a deep, 100-word analysis. Start with extracted facts, explain causal chain, and state why current odds are mispriced.]*
+        **2. 🧠 Deep Logic (The "Why")**
+        > *[Mandatory: Write a detailed paragraph. Explain the causal link. Why is the market wrong? What information are other traders missing? Use second-order thinking.]*
         
-        **3. ⏳ Strategy (执行)**
-        - **Timeframe:** [Duration]
-        - **Risk:** [Main Risk]
+        **3. 🛡️ Risk & Execution**
+        - **The Trap:** [What could go wrong? e.g., Ambiguous wording, Delay]
+        - **Exit Strategy:** [When to take profit or cut loss]
         ---
         """
         response = model.generate_content(prompt)
-        btn_html = """<br><a href='https://polymarket.com/' target='_blank' style='text-decoration:none;'><button class='execute-btn'>🚀 EXECUTE TRADE ON POLYMARKET</button></a>"""
+        
+        # Inject the Execution Button
+        btn_html = """
+        <br>
+        <a href='https://polymarket.com/' target='_blank' style='text-decoration:none;'>
+        <button class='execute-btn'>🚀 EXECUTE TRADE ON POLYMARKET</button>
+        </a>
+        """
         return response.text + btn_html
-    except Exception as e: return f"❌ Error: {str(e)}"
+    except Exception as e: return f"❌ Intelligence Error: {str(e)}"
 
-# ================= 📘 6. 使用说明书 (User Manual) =================
+# ================= 📘 6. MANUAL MODULE =================
 
-@st.dialog("📘 Be Holmes Manual / 使用手册", width="large")
+@st.dialog("📘 Be Holmes Manual", width="large")
 def open_manual():
-    # 语言切换
     lang = st.radio("Language / 语言", ["English", "中文"], horizontal=True)
     st.markdown("---")
     
     if lang == "中文":
         st.markdown("""
-        ### 🕵️‍♂️ 产品介绍
-        **Be Holmes** 是一个基于 **Gemini 2.5** 的预测市场 Alpha 捕获引擎。它不只是阅读新闻，而是进行**二阶因果推理**，帮助你发现被市场低估的赔率。
+        ### 🕵️‍♂️ 系统简介
+        **Be Holmes** 是基于 Gemini 2.5 的全知全能金融侦探。它具备"深海声纳"能力，能从数千个预测市场中精准定位与你输入新闻相关的标的。
 
-        ### 🚀 核心功能
-        1.  **深海声纳 (Deep Sonar):** 自动提取你输入新闻的关键词，绕过热门榜单，挖掘全网冷门市场。
-        2.  **实时推理 (Real-time Logic):** 结合 Polymarket 实时赔率与新闻事实，计算胜率偏差。
+        ### 🚀 核心工作流
+        1.  **关键词萃取:** 系统自动理解你的自然语言输入（新闻/传闻）。
+        2.  **全域遍历:** 绕过热门榜单，扫描 Polymarket 全数据库。
+        3.  **Alpha 推理:** 结合实时赔率与事件逻辑，输出交易胜率分析。
         
-        ### 🛠️ 使用步骤
-        1.  在主界面的文本框输入**任何新闻、传闻或推特链接** (支持中英文)。
-        2.  点击红色的 **"🔍 INVESTIGATE"** 按钮。
-        3.  系统会自动搜索相关市场，并生成一份包含**买卖信号、置信度、逻辑链**的深度报告。
+        ### 🛠️ 操作指南
+        - **输入:** 在主文本框粘贴新闻链接或文字。
+        - **调查:** 点击红色 **INVESTIGATE** 按钮。
+        - **决策:** 阅读生成的深度报告，根据置信度执行交易。
         """)
     else:
         st.markdown("""
-        ### 🕵️‍♂️ Introduction
-        **Be Holmes** is an Alpha-capture engine for prediction markets powered by **Gemini 2.5**. It performs **Second-order Causal Reasoning** to identify mispriced odds based on breaking news.
+        ### 🕵️‍♂️ System Profile
+        **Be Holmes** is an omniscient financial detective powered by Gemini 2.5. It features "Deep Sonar" capability to pinpoint prediction markets relevant to your intel from thousands of active contracts.
 
-        ### 🚀 Core Features
-        1.  **Deep Sonar:** Automatically extracts keywords from your input to search for hidden/niche markets beyond the Top 100.
-        2.  **Real-time Logic:** Analyzes the gap between implied market probability and actual event probability.
+        ### 🚀 Core Workflow
+        1.  **Keyword Extraction:** Distills your natural language input into search vectors.
+        2.  **Deep Traversal:** Scans the entire Polymarket database (bypassing Top 100).
+        3.  **Alpha Reasoning:** Synthesizes real-time odds with causal logic to find mispriced assets.
 
-        ### 🛠️ How to Use
-        1.  Enter any **news, rumor, or X link** in the main text box.
-        2.  Click the Red **"🔍 INVESTIGATE"** button.
-        3.  The agent will scan the markets and generate a report with **Signals, Confidence Scores, and Causal Logic**.
+        ### 🛠️ User Guide
+        - **Input:** Paste news, rumors, or X links in the main text box.
+        - **Investigate:** Click the Red **INVESTIGATE** button.
+        - **Execute:** Review the deep logic report and trade based on the confidence score.
         """)
 
-# ================= 🖥️ 7. 主界面布局 (Main Stage) =================
+# ================= 🖥️ 7. MAIN INTERFACE =================
 
+# --- Sidebar ---
 with st.sidebar:
     st.markdown("## 💼 DETECTIVE'S TOOLKIT")
     st.markdown("`CORE: GEMINI-2.5-FLASH`")
@@ -291,32 +313,30 @@ with st.sidebar:
             st.code(f"{m['odds']}") 
     else: st.error("⚠️ Data Stream Offline")
 
-# --- 主区域 ---
+# --- Main Stage ---
 st.title("🕵️‍♂️ Be Holmes")
 st.caption("EVENT-DRIVEN INTELLIGENCE | SECOND-ORDER CAUSAL REASONING") 
 st.markdown("---")
 
-# 1. 证据输入区
+# 1. Evidence Input
 st.markdown("### 📁 EVIDENCE INPUT")
 user_news = st.text_area(
     "Input News / Rumors / X Links...", 
     height=150, 
-    placeholder="Try searching specifically: 'iPhone 18 rumors' or 'Trump tariffs'...", 
+    placeholder="Paste detailed intel here... (e.g., 'Rumors that iPhone 18 will remove all buttons')", 
     label_visibility="collapsed"
 )
 
-# 2. 按钮操作区 (双列布局，紧贴输入框)
+# 2. Action Zone (Aligned Buttons)
 col_btn_main, col_btn_help = st.columns([4, 1])
 
 with col_btn_main:
-    # 红色核心按钮
-    ignite_btn = st.button("🔍 INVESTIGATE / 开始调查", use_container_width=True)
+    ignite_btn = st.button("🔍 INVESTIGATE", use_container_width=True)
 
 with col_btn_help:
-    # 灰色辅助按钮
     help_btn = st.button("📘 Manual", use_container_width=True)
 
-# 3. 逻辑触发
+# 3. Logic Trigger
 if help_btn:
     open_manual()
 
@@ -324,25 +344,28 @@ if ignite_btn:
     if not user_news:
         st.warning("⚠️ Evidence required to initiate investigation.")
     else:
+        # --- LOGIC: DEEP SONAR & ANALYSIS ---
         with st.status("🚀 Initiating Deep Scan...", expanded=True) as status:
-            st.write("🧠 Analyzing intent (Gemini 2.5)...")
+            st.write("🧠 Extracting semantic keywords (Gemini 2.5)...")
             search_keywords = extract_keywords_with_ai(user_news, api_key)
+            
             sonar_markets = []
             if search_keywords:
                 st.write(f"🌊 Active Sonar Ping: '{search_keywords}'...")
                 sonar_markets = deep_sonar_search(search_keywords)
-                st.write(f"✅ Found {len(sonar_markets)} specific markets in the deep web.")
+                st.write(f"✅ Found {len(sonar_markets)} specific markets in deep storage.")
             
+            # Merge & Deduplicate
             combined_markets = sonar_markets + top_markets
             seen_slugs = set()
             unique_markets = []
             for m in combined_markets:
                 if m['slug'] not in seen_slugs: unique_markets.append(m); seen_slugs.add(m['slug'])
             
-            st.write("⚖️ Cross-referencing odds data...")
+            st.write("⚖️ Analyzing Probability Gap...")
             status.update(label="✅ Investigation Complete", state="complete", expanded=False)
 
-        if not unique_markets: st.error("⚠️ No relevant markets found anywhere.")
+        if not unique_markets: st.error("⚠️ No relevant markets found in the database.")
         else:
             with st.spinner(">> Deducing Alpha..."):
                 result = consult_holmes(user_news, unique_markets, api_key)
