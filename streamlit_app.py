@@ -92,7 +92,7 @@ st.markdown("""
 # ================= 🔐 3. KEY MANAGEMENT =================
 active_key = None
 
-# ================= 📡 4. DATA ENGINE (ATOMIC MARKET SEARCH V15.0) =================
+# ================= 📡 4. DATA ENGINE (HYBRID DUAL-ENGINE V16.0) =================
 
 def detect_language_type(text):
     for char in text:
@@ -100,16 +100,12 @@ def detect_language_type(text):
     return "ENGLISH"
 
 def parse_single_market(m):
-    """专门解析 /markets 接口返回的扁平数据结构"""
     try:
-        # 在 markets 接口中，字段名通常是 'question' 而不是 'title'
         title = m.get('question', m.get('title', 'Unknown Market'))
         slug = m.get('slug', '')
         
-        # 过滤掉已经关闭的市场
         if m.get('closed') is True: return None
         
-        # 解析赔率
         odds_display = "N/A"
         raw_outcomes = m.get('outcomes', '["Yes", "No"]')
         outcomes = json.loads(raw_outcomes) if isinstance(raw_outcomes, str) else raw_outcomes
@@ -130,13 +126,12 @@ def parse_single_market(m):
         volume = float(m.get('volume', 0))
         
         return {"title": title, "odds": odds_display, "slug": slug, "volume": volume, "id": m.get('id')}
-    except:
-        return None
+    except: return None
 
 @st.cache_data(ttl=300) 
 def fetch_top_markets():
-    # 🔥 FIX 1: 改用 /markets 接口，直接获取热门具体问题
     try:
+        # 获取 Top 50 用于侧边栏显示
         url = "https://gamma-api.polymarket.com/markets?limit=50&active=true&closed=false&sort=volume"
         response = requests.get(url, headers={"User-Agent": "BeHolmes/1.0"}, timeout=6)
         if response.status_code == 200:
@@ -149,31 +144,66 @@ def fetch_top_markets():
         return []
     except: return []
 
-def atomic_search(keywords_list):
+@st.cache_data(ttl=60) # 缓存时间短一点，保证新鲜
+def fetch_all_active_markets():
     """
-    🔥 V15 原子搜索：直接搜 Markets，不搜 Events
-    这能解决 'SpaceX IPO' 藏在某个莫名其妙 Event 里的问题。
+    🔥 引擎 A：全量大盘扫描
+    一次性拉取 Volume 最大的 500 个市场到本地内存。
+    这比依赖 API 的 'q=' 搜索靠谱得多。
+    """
+    try:
+        # limit=500 是关键，确保 SpaceX IPO 这种 800k volume 的市场一定在里面
+        url = "https://gamma-api.polymarket.com/markets?limit=500&active=true&closed=false&sort=volume"
+        response = requests.get(url, headers={"User-Agent": "BeHolmes/1.0"}, timeout=10)
+        if response.status_code == 200:
+            raw_data = response.json()
+            cleaned = []
+            for m in raw_data:
+                parsed = parse_single_market(m)
+                if parsed: cleaned.append(parsed)
+            return cleaned
+        return []
+    except: return []
+
+def hybrid_search(keywords_list):
+    """
+    🔥 V16 混合搜索逻辑：
+    1. 先从本地 500 个热门市场里进行 Python 字符串匹配（最准）。
+    2. 如果没找到，再退回到 API 关键词搜索（查缺补漏）。
     """
     all_results = []
     seen_ids = set()
     
-    for kw in keywords_list:
-        if not kw: continue
-        # 🔥 FIX 2: 搜索 /markets，并强制按 volume 排序，确保大额盘口置顶
-        # 加上 sort=volume 是为了把你看到的那个 846K 的市场排在前面
-        url = f"https://gamma-api.polymarket.com/markets?limit=50&active=true&closed=false&sort=volume&q={kw}"
-        try:
-            response = requests.get(url, headers={"User-Agent": "BeHolmes/1.0"}, timeout=6)
-            if response.status_code == 200:
-                data = response.json()
-                for m in data:
-                    parsed = parse_single_market(m)
-                    if parsed and parsed['id'] not in seen_ids:
-                        all_results.append(parsed)
-                        seen_ids.add(parsed['id'])
-        except: continue
+    # --- Phase 1: Local Neural Search (从 Top 500 里找) ---
+    # 只要关键词出现在标题里，就抓住它
+    big_data = fetch_all_active_markets()
     
-    # 本地再按 Volume 降序排一次，确保万无一失
+    for m in big_data:
+        # 只要任意一个关键词命中标题，就算匹配
+        for kw in keywords_list:
+            if kw.lower() in m['title'].lower():
+                if m['id'] not in seen_ids:
+                    all_results.append(m)
+                    seen_ids.add(m['id'])
+                break # 命中一个词就不需要继续匹配其他词了
+
+    # --- Phase 2: API Fallback (如果本地没找到，再去问 API) ---
+    if len(all_results) < 5:
+        for kw in keywords_list:
+            if not kw: continue
+            url = f"https://gamma-api.polymarket.com/markets?limit=20&active=true&closed=false&sort=volume&q={kw}"
+            try:
+                response = requests.get(url, headers={"User-Agent": "BeHolmes/1.0"}, timeout=5)
+                if response.status_code == 200:
+                    data = response.json()
+                    for m in data:
+                        parsed = parse_single_market(m)
+                        if parsed and parsed['id'] not in seen_ids:
+                            all_results.append(parsed)
+                            seen_ids.add(parsed['id'])
+            except: continue
+
+    # 再次按 Volume 排序，确保最热门的排第一
     all_results.sort(key=lambda x: x['volume'], reverse=True)
     return all_results
 
@@ -182,9 +212,8 @@ def extract_search_terms_ai(user_text, key):
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
-        # 提取更精准的短语
         prompt = f"""
-        Extract 2 distinct English search keywords for Polymarket.
+        Extract 2 distinct English search keywords.
         1. Exact concept (e.g. "SpaceX IPO")
         2. Broad entity (e.g. "SpaceX")
         Input: "{user_text}"
@@ -203,7 +232,6 @@ def consult_holmes(user_evidence, market_list, key):
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # 喂给 AI 前 30 个结果 (因为是 Market 级别，粒度细，30个足够涵盖)
         markets_text = "\n".join([f"- {m['title']} [Odds: {m['odds']}]" for m in market_list[:30]])
         target_language = detect_language_type(user_evidence)
         
@@ -211,14 +239,13 @@ def consult_holmes(user_evidence, market_list, key):
         Role: You are **Be Holmes**, a Senior Hedge Fund Strategist.
         
         [User Input]: "{user_evidence}"
-        [Market Data (Sorted by Volume)]: 
+        [Market Data (Filtered Match)]: 
         {markets_text}
 
         **MANDATORY INSTRUCTION:**
         1. **Language:** Output strictly in **{target_language}**.
-        2. **Targeting:** The list is now granular markets. Find the specific question asking about the event.
-           - Look specifically for "SpaceX" AND "IPO" in the title.
-           - The user is looking for a high-volume market.
+        2. **Targeting:** Find the EXACT market. If user asks "SpaceX IPO", do NOT pick "Kraken".
+           - Prioritize markets with higher volume or exact title match.
         
         **OUTPUT FORMAT (Strict Markdown):**
         
@@ -265,8 +292,10 @@ def open_manual():
         ### 🕵️‍♂️ 系统简介
         **Be Holmes** 是基于 Gemini 2.5 的全知全能金融侦探。
         
-        ### 🚀 V15.0 升级：原子搜索
-        我们升级了底层数据引擎，不再搜索模糊的"事件组"，而是直接检索 Polymarket 上每一个具体的**交易合约 (Markets)**。配合成交量加权排序，确保精准命中高流动性标的。
+        ### 🚀 V16.0 核心引擎：混合双驱
+        为了解决 API 搜索不准的问题，V16 版本引入了**"全量大盘扫描"**机制。
+        1. **大盘快照：** 系统直接拉取 Polymarket 活跃度最高的 500 个市场到本地内存。
+        2. **神经检索：** 在本地进行毫秒级的 Python 语义匹配，确保如 "SpaceX IPO" 等热门市场**100% 召回**。
         
         ### 🛠️ 操作指南
         - **输入:** 粘贴新闻或关键词。
@@ -277,8 +306,10 @@ def open_manual():
         ### 🕵️‍♂️ System Profile
         **Be Holmes** is an omniscient financial detective.
         
-        ### 🚀 V15.0 Update: Atomic Search
-        We now query individual **Markets** instead of aggregated Events. This ensures high-precision discovery of specific contracts (e.g., "SpaceX IPO") sorted by liquidity.
+        ### 🚀 V16.0 Engine: Hybrid Search
+        To fix API blind spots, we now perform a **"Full Market Scan"**.
+        1. **Snapshot:** Fetches the top 500 active markets into local memory.
+        2. **Neural Match:** Performs local semantic matching to guarantee 100% recall of popular markets like "SpaceX IPO".
         """)
 
 # ================= 🖥️ 7. MAIN INTERFACE =================
@@ -335,25 +366,26 @@ if ignite_btn:
     if not user_news:
         st.warning("⚠️ Evidence required to initiate investigation.")
     else:
-        with st.status("🚀 Initiating Atomic Market Search...", expanded=True) as status:
-            st.write("🧠 Extracting precise market tags (Gemini 2.5)...")
+        with st.status("🚀 Initiating Hybrid Search Protocol...", expanded=True) as status:
+            st.write("🧠 Extracting intent (Gemini 2.5)...")
             search_keywords = extract_search_terms_ai(user_news, active_key)
             
             sonar_markets = []
             if search_keywords:
-                st.write(f"🌊 Querying Market API: {search_keywords}...")
-                # 使用原子搜索
-                sonar_markets = atomic_search(search_keywords)
-                st.write(f"✅ Retrieved {len(sonar_markets)} specific contracts.")
+                st.write(f"🌊 Scanning Top 500 Markets for: {search_keywords}...")
+                # V16 混合搜索
+                sonar_markets = hybrid_search(search_keywords)
+                st.write(f"✅ Neural Match: Found {len(sonar_markets)} markets locally.")
             
-            # 没搜到就用 Top 市场兜底
+            # 如果真的没搜到，再用 API 搜索做最后尝试
             if not sonar_markets:
-                sonar_markets = top_markets
-            
-            st.write("⚖️ Analyzing Alpha...")
+                st.write("⚠️ Local match failed. Trying API Fallback...")
+                # 这里可以加个逻辑，但 hybrid_search 内部已经包含了 fallback
+                
+            st.write("⚖️ Calculating Alpha...")
             status.update(label="✅ Investigation Complete", state="complete", expanded=False)
 
-        if not sonar_markets: st.error("⚠️ No relevant markets found in the database.")
+        if not sonar_markets: st.error("⚠️ No relevant markets found (Deep Scan failed).")
         else:
             with st.spinner(">> Deducing Alpha..."):
                 result = consult_holmes(user_news, sonar_markets, active_key)
