@@ -12,30 +12,19 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ================= 🎨 2. UI DESIGN (Magma Red - Professional) =================
+# ================= 🎨 2. UI DESIGN (Magma Red - Clean Mode) =================
 st.markdown("""
 <style>
-    /* --- HIDE STREAMLIT SYSTEM ELEMENTS (CLEAN MODE) --- */
-    /* 隐藏右上角 Hamburger Menu, Share, Edit, Star */
-    [data-testid="stToolbar"] {
-        visibility: hidden;
-        height: 0%;
-        position: fixed;
-    }
-    /* 隐藏底部的 "Made with Streamlit" */
-    footer {
-        visibility: hidden;
-    }
-    /* 隐藏顶部的彩色线条装饰 */
-    header {
-        visibility: hidden;
-    }
+    /* --- HIDE SYSTEM ELEMENTS --- */
+    [data-testid="stToolbar"] { visibility: hidden; height: 0%; position: fixed; }
+    footer { visibility: hidden; }
+    header { visibility: hidden; }
 
-    /* --- Global Background: Void Black --- */
+    /* --- Global Background --- */
     .stApp { background-color: #050505; font-family: 'Roboto Mono', monospace; }
     [data-testid="stSidebar"] { background-color: #000000; border-right: 1px solid #1a1a1a; }
     
-    /* --- Typography: Magma Gradient --- */
+    /* --- Typography --- */
     h1 { 
         background: linear-gradient(90deg, #FF4500, #E63946); 
         -webkit-background-clip: text;
@@ -47,13 +36,12 @@ st.markdown("""
         text-shadow: 0 0 20px rgba(255, 69, 0, 0.2);
     }
     
-    /* --- Text Colors --- */
     h3 { color: #FF7F50 !important; } 
     p, label, .stMarkdown, .stText, li, div, span { color: #A0A0A0 !important; }
     strong { color: #FFF !important; font-weight: 600; } 
     a { text-decoration: none !important; border-bottom: none !important; }
 
-    /* --- Input Fields: High Contrast --- */
+    /* --- Inputs --- */
     .stTextArea textarea, .stNumberInput input, .stTextInput input, .stSelectbox div[data-baseweb="select"] { 
         background-color: #0A0A0A !important; 
         color: #E63946 !important; 
@@ -65,69 +53,40 @@ st.markdown("""
         box-shadow: 0 0 15px rgba(255, 69, 0, 0.2); 
     }
     
-    /* --- Button Styles --- */
-    .stButton button {
-        width: 100%;
-        border-radius: 6px;
-        font-weight: bold;
-        transition: all 0.3s ease;
-    }
+    /* --- Buttons --- */
+    .stButton button { width: 100%; border-radius: 6px; font-weight: bold; transition: all 0.3s ease; }
     
-    /* Primary Action Button (Red) */
+    /* Investigate Button (Red) */
     div[data-testid="column"]:nth-of-type(1) div.stButton > button { 
         background: linear-gradient(90deg, #8B0000, #FF4500); 
-        color: #FFF; 
-        border: none;
-        box-shadow: 0 4px 15px rgba(255, 69, 0, 0.3);
+        color: #FFF; border: none; box-shadow: 0 4px 15px rgba(255, 69, 0, 0.3);
     }
     div[data-testid="column"]:nth-of-type(1) div.stButton > button:hover { 
-        box-shadow: 0 6px 25px rgba(255, 69, 0, 0.6);
-        transform: translateY(-2px);
+        box-shadow: 0 6px 25px rgba(255, 69, 0, 0.6); transform: translateY(-2px);
     }
 
-    /* Secondary Button (Ghost) */
+    /* Manual Button (Ghost) */
     div[data-testid="column"]:nth-of-type(2) div.stButton > button { 
-        background-color: transparent; 
-        color: #666; 
-        border: 1px solid #333; 
+        background-color: transparent; color: #666; border: 1px solid #333; 
     }
     div[data-testid="column"]:nth-of-type(2) div.stButton > button:hover { 
-        border-color: #FF4500;
-        color: #FF4500;
-        background-color: #1a0505;
+        border-color: #FF4500; color: #FF4500; background-color: #1a0505;
     }
 
-    /* --- Report: Execution Button --- */
+    /* --- Report Elements --- */
     .execute-btn {
         background: linear-gradient(90deg, #FF4500, #FFD700); 
-        border: none;
-        color: #000;
-        width: 100%;
-        padding: 15px;
-        font-weight: 900;
-        font-size: 16px;
-        cursor: pointer;
-        border-radius: 6px;
-        text-transform: uppercase;
-        letter-spacing: 2px;
-        box-shadow: 0 5px 15px rgba(255, 69, 0, 0.3);
-        margin-top: 20px;
+        border: none; color: #000; width: 100%; padding: 15px;
+        font-weight: 900; font-size: 16px; cursor: pointer; border-radius: 6px;
+        text-transform: uppercase; letter-spacing: 2px;
+        box-shadow: 0 5px 15px rgba(255, 69, 0, 0.3); margin-top: 20px;
     }
     .execute-btn:hover { transform: scale(1.02); box-shadow: 0 8px 25px rgba(255, 69, 0, 0.5); }
 
-    /* --- Report: Live Ticker HUD --- */
     .ticker-box {
-        background-color: #080808;
-        border: 1px solid #222;
-        border-left: 4px solid #FF4500;
-        color: #FF4500;
-        font-family: 'Courier New', monospace;
-        padding: 15px;
-        margin: 15px 0;
-        font-size: 1.05em;
-        font-weight: bold;
-        display: flex;
-        align-items: center;
+        background-color: #080808; border: 1px solid #222; border-left: 4px solid #FF4500;
+        color: #FF4500; font-family: 'Courier New', monospace; padding: 15px; margin: 15px 0;
+        font-size: 1.05em; font-weight: bold; display: flex; align-items: center;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -146,7 +105,6 @@ except Exception as e:
 # ================= 📡 4. DATA ENGINE (DEEP SONAR) =================
 
 def parse_market_data(data):
-    """Parses raw API JSON into clean market objects."""
     markets_clean = []
     if not data: return []
     for event in data:
@@ -155,7 +113,6 @@ def parse_market_data(data):
         all_markets = event.get('markets', [])
         if not all_markets: continue
 
-        # Find liquid market
         best_market = None
         max_volume = -1
         for m in all_markets:
@@ -167,7 +124,6 @@ def parse_market_data(data):
         
         if not best_market: best_market = all_markets[0]
 
-        # Parse Odds
         odds_display = "N/A"
         try:
             raw_outcomes = best_market.get('outcomes', '["Yes", "No"]')
@@ -189,28 +145,23 @@ def parse_market_data(data):
 
 @st.cache_data(ttl=300) 
 def fetch_top_markets():
-    """Baseline: Fetch top volume markets."""
     try:
         response = requests.get("https://gamma-api.polymarket.com/events?limit=50&active=true&closed=false&sort=volume", headers={"User-Agent": "BeHolmes/1.0"}, timeout=5)
         return parse_market_data(response.json()) if response.status_code == 200 else []
     except: return []
 
 def deep_sonar_search(keyword):
-    """Active Sonar: Search entire database by keyword."""
     if not keyword: return []
     try:
-        # 'q' parameter searches title, description, and tags
         response = requests.get(f"https://gamma-api.polymarket.com/events?limit=20&active=true&closed=false&q={keyword}", headers={"User-Agent": "BeHolmes/1.0"}, timeout=5)
         return parse_market_data(response.json()) if response.status_code == 200 else []
     except: return []
 
 def extract_keywords_with_ai(user_text, key):
-    """Uses Gemini to distill user input into search queries."""
     if not user_text: return None
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
-        # Prompt to extract English keywords regardless of input language
         response = model.generate_content(f"Extract 1-2 most important English keywords for a search engine from this text. Text: '{user_text}'. Output strictly format: keyword1 keyword2")
         return response.text.strip()
     except: return None
@@ -224,22 +175,17 @@ def consult_holmes(user_evidence, market_list, key):
         markets_text = "\n".join([f"- {m['title']} [Odds: {m['odds']}]" for m in market_list[:50]])
         
         prompt = f"""
-        Role: You are **Be Holmes**, an omniscient financial intelligence agent specializing in prediction markets.
-        Your goal is to perform a deep-dive analysis, connecting news events to market probabilities with surgical precision.
+        Role: You are **Be Holmes**, a Senior Hedge Fund Strategist specializing in Prediction Markets. 
+        You do not just summarize news; you provide **ruthless, high-conviction trading mandates**.
 
-        [Evidence / Lead]: "{user_evidence}"
+        [Evidence / Intel]: "{user_evidence}"
         [Market Data Scan]: 
         {markets_text}
 
         **PROTOCOL:**
-        1. **Language Detection:** - IF input is Chinese -> Output strictly in CHINESE.
-           - ELSE -> Output strictly in ENGLISH.
+        1. **Language:** IF input is Chinese -> Output strictly in CHINESE. ELSE -> ENGLISH.
+        2. **Reasoning:** Use "Second-Order Thinking". Do not just look at the event; look at how the market *perceives* the event. Is it priced in? Is it a trap?
         
-        2. **Analysis Framework:**
-           - Identify the specific market closest to the evidence.
-           - Analyze the "Probability Gap": Difference between market odds and actual event probability.
-           - Provide a clear Trading Strategy (Buy/Sell/Hold) with specific entry/exit points.
-
         **OUTPUT FORMAT (Strict Markdown):**
         
         ---
@@ -249,28 +195,29 @@ def consult_holmes(user_evidence, market_list, key):
         🔥 LIVE SNAPSHOT: [Insert Live Odds Here]
         </div>
         
-        **1. ⚖️ The Verdict**
-        - **Signal:** 🟢 STRONG BUY / 🔴 SELL / ⚠️ WATCH
-        - **Confidence Score:** **[0-100]%**
-        - **Suggested Holding Period:** [e.g., Intraday, 48 Hours, Until Official Filing]
+        **1. ⚖️ The Verdict (交易指令)**
+        - **Signal:** 🟢 AGGRESSIVE BUY / 🔴 HARD SELL / ⚠️ WAIT & WATCH
+        - **Confidence Score:** **[0-100]%** (Be precise)
+        - **Target:** Market implies [Current %], I value it at [Your %].
         
-        **2. 🧠 Deep Logic (The "Why")**
-        > *[Mandatory: Write a detailed paragraph. Explain the causal link. Why is the market wrong? What information are other traders missing? Use second-order thinking.]*
+        **2. 🧠 Deep Logic (深度推演)**
+        > *[MANDATORY: Write a comprehensive 200-word analysis. Start with the hard facts, then explain the transmission mechanism to the market price. Why is the crowd wrong? Explain the "Alpha".]*
         
-        **3. 🛡️ Risk & Execution**
-        - **The Trap:** [What could go wrong? e.g., Ambiguous wording, Delay]
-        - **Exit Strategy:** [When to take profit or cut loss]
+        **3. 🛡️ Execution Protocol (执行方案)**
+        - **Action:** [Specific instruction, e.g., "Enter now at current odds"]
+        - **Timeframe:** [e.g., "Hold for 48 hours" or "Hold until official confirmation"]
+        - **Exit Condition:** [e.g., "Take profit if odds hit 60%" or "Stop loss if X happens"]
         ---
         """
         response = model.generate_content(prompt)
         
-        # Inject the Execution Button
+        # --- FIX: Removed indentation to prevent Markdown code block rendering ---
         btn_html = """
-        <br>
-        <a href='https://polymarket.com/' target='_blank' style='text-decoration:none;'>
-        <button class='execute-btn'>🚀 EXECUTE TRADE ON POLYMARKET</button>
-        </a>
-        """
+<br>
+<a href='https://polymarket.com/' target='_blank' style='text-decoration:none;'>
+<button class='execute-btn'>🚀 EXECUTE TRADE ON POLYMARKET</button>
+</a>
+"""
         return response.text + btn_html
     except Exception as e: return f"❌ Intelligence Error: {str(e)}"
 
@@ -343,18 +290,15 @@ user_news = st.text_area(
     label_visibility="collapsed"
 )
 
-# 2. Action Zone (Aligned Buttons)
+# 2. Action Zone
 col_btn_main, col_btn_help = st.columns([4, 1])
-
 with col_btn_main:
     ignite_btn = st.button("🔍 INVESTIGATE", use_container_width=True)
-
 with col_btn_help:
     help_btn = st.button("📘 Manual", use_container_width=True)
 
 # 3. Logic Trigger
-if help_btn:
-    open_manual()
+if help_btn: open_manual()
 
 if ignite_btn:
     if not user_news:
@@ -371,7 +315,6 @@ if ignite_btn:
                 sonar_markets = deep_sonar_search(search_keywords)
                 st.write(f"✅ Found {len(sonar_markets)} specific markets in deep storage.")
             
-            # Merge & Deduplicate
             combined_markets = sonar_markets + top_markets
             seen_slugs = set()
             unique_markets = []
