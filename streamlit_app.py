@@ -314,7 +314,8 @@ with st.sidebar:
     else: st.error("⚠️ Data Stream Offline")
 
 # --- Main Stage ---
-st.title("🕵️‍♂️ Be Holmes")
+# 移除了图标，只保留文字，应用了熔岩渐变色CSS
+st.title("Be Holmes")
 st.caption("EVENT-DRIVEN INTELLIGENCE | SECOND-ORDER CAUSAL REASONING") 
 st.markdown("---")
 
