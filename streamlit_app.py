@@ -1,316 +1,248 @@
 import streamlit as st
+import requests
+import json
 import google.generativeai as genai
-import time
 
-# 尝试导入搜索库，如果用户没装，不仅不报错，还自动降级为“知识库模式”
-try:
-    from duckduckgo_search import DDGS
-    SEARCH_AVAILABLE = True
-except ImportError:
-    SEARCH_AVAILABLE = False
-
-# ================= 🕵️‍♂️ 1. 系统配置 =================
+# ================= 🕵️‍♂️ 1. SYSTEM CONFIGURATION =================
 st.set_page_config(
-    page_title="Be Holmes | Market Detective",
+    page_title="Be Holmes | Alpha Hunter",
     page_icon="🕵️‍♂️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ================= 🎨 2. UI 设计 (强制黑字白底) =================
+# 🔥 DOME KEY (备用)
+DOME_API_KEY = "6f08669ca2c6a9541f0ef1c29e5928d2dc22857b"
+
+# ================= 🎨 2. UI DESIGN =================
 st.markdown("""
 <style>
-    /* 1. 暴力重置全局背景和文字颜色 */
-    .stApp {
-        background-color: #F8F9FA !important;
+    [data-testid="stToolbar"] { visibility: hidden; height: 0%; position: fixed; }
+    footer { visibility: hidden; }
+    header { visibility: hidden; }
+    .stApp { background-color: #050505; font-family: 'Roboto Mono', monospace; }
+    [data-testid="stSidebar"] { background-color: #000000; border-right: 1px solid #1a1a1a; }
+    h1 { 
+        background: linear-gradient(90deg, #FF4500, #E63946); 
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        font-family: 'Georgia', serif; font-weight: 800;
+        border-bottom: 2px solid #331111; padding-bottom: 15px;
     }
-    
-    /* 强制所有层级的文字颜色为深灰/黑，覆盖系统深色模式设置 */
-    h1, h2, h3, h4, h5, h6, p, div, span, label, li, .stMarkdown {
-        color: #212529 !important;
+    h3 { color: #FF7F50 !important; } 
+    p, label, .stMarkdown, .stText, li, div, span { color: #A0A0A0 !important; }
+    strong { color: #FFF !important; font-weight: 600; } 
+    .stTextArea textarea, .stTextInput input { 
+        background-color: #0A0A0A !important; color: #E63946 !important; 
+        border: 1px solid #333 !important; border-radius: 6px;
     }
-
-    /* 2. 侧边栏专门修复 */
-    section[data-testid="stSidebar"] {
-        background-color: #FFFFFF !important;
-        border-right: 1px solid #E9ECEF;
+    .execute-btn {
+        background: linear-gradient(90deg, #FF4500, #FFD700); 
+        border: none; color: #000; width: 100%; padding: 15px;
+        font-weight: 900; font-size: 16px; cursor: pointer; border-radius: 6px;
+        text-transform: uppercase; letter-spacing: 2px; margin-top: 20px;
     }
-    section[data-testid="stSidebar"] * {
-        color: #212529 !important;
+    .ticker-box {
+        background-color: #080808; border: 1px solid #222; border-left: 4px solid #FF4500;
+        color: #FF4500; font-family: 'Courier New', monospace; padding: 15px; margin: 15px 0;
+        font-size: 1.05em; font-weight: bold; display: flex; align-items: center;
     }
-
-    /* 3. 输入框文字修复 */
-    .stTextInput input {
-        background-color: #FFFFFF !important;
-        color: #212529 !important; /* 强制输入文字为黑 */
-        border: 1px solid #CED4DA !important;
-        border-radius: 8px;
-    }
-    .stTextInput label {
-        color: #212529 !important;
-    }
-    
-    /* 4. 标题特别强化 (品牌红) */
-    h1 {
-        color: #D62828 !important; 
-        font-weight: 900 !important;
-    }
-    
-    /* 5. 按钮样式 */
-    .stButton button {
-        background: linear-gradient(135deg, #D62828 0%, #C1121F 100%) !important;
-        color: white !important; /* 按钮文字必须是白 */
-        border: none;
-        font-weight: bold;
-    }
-    .stButton button p {
-        color: white !important; /* 确保按钮里的文字是白 */
-    }
-    
-    /* 6. 报告卡片 */
-    .report-card {
-        background-color: white;
-        padding: 30px;
-        border-radius: 12px;
-        border-left: 6px solid #D62828;
-        box-shadow: 0 5px 15px rgba(0,0,0,0.08);
-        margin-top: 20px;
-        color: #333 !important;
-    }
-    
-    /* 隐藏多余元素 */
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 🌐 3. 多语言字典 =================
-LANG = {
-    "CN": {
-        "title": "Be Holmes",
-        "subtitle": "海外发行情报侦探 | 竞品分析 & 舆情洞察",
-        "sidebar_title": "侦探工具箱",
-        "api_label": "Gemini API 密钥",
-        "api_help": "必填，用于驱动 AI 大脑分析情报。",
-        "input_label_1": "目标产品 / 竞品名称",
-        "input_placeholder_1": "例如：原神 (Genshin Impact)",
-        "input_label_2": "目标市场 / 国家",
-        "input_placeholder_2": "例如：巴西 (Brazil)",
-        "btn_start": "🔍 开始全网侦查",
-        "btn_manual": "📘 使用手册",
-        "status_searching": "正在全网搜集情报...",
-        "status_analyzing": "Be Holmes 正在分析市场舆情...",
-        "error_no_key": "❌ 请先在左侧输入 Gemini API Key",
-        "error_no_input": "⚠️ 请输入完整的产品名和目标市场",
-        "manual_title": "📘 使用手册",
-        "manual_content": """
-        ### 🕵️‍♂️ Be Holmes 是什么？
-        这是一个专为**海外发行 PM** 打造的 AI 智能体。它模拟了一位资深市场分析师，能在 30 秒内帮你摸清竞品在海外的底细。
-        
-        ### 🚀 核心功能
-        1. **舆情侦查：** 自动搜索 Reddit、Twitter、App Store 上的真实用户评价。
-        2. **痛点挖掘：** 找出竞品在当地被吐槽最惨的地方（也就是你的机会）。
-        3. **本地化分析：** 判断产品是否符合当地文化习俗。
-        
-        ### 🛠️ 如何使用
-        1. 在左侧填入 API Key。
-        2. 输入你想调研的**竞品**（如：Mobile Legends）。
-        3. 输入**目标国家**（如：Indonesia）。
-        4. 点击侦查，获取一份专业的全英文/全中文分析报告。
-        """,
-        "report_title": "📝 侦探档案：",
-        "install_hint": "💡 提示：检测到未安装 duckduckgo-search，将使用 AI 知识库模式。建议 pip install duckduckgo-search 以开启联网能力。"
-    },
-    "EN": {
-        "title": "Be Holmes",
-        "subtitle": "Global Market Detective | Competitor Intelligence Agent",
-        "sidebar_title": "Detective Toolkit",
-        "api_label": "Gemini API Key",
-        "api_help": "Required to power the AI reasoning engine.",
-        "input_label_1": "Product / Competitor Name",
-        "input_placeholder_1": "e.g. Genshin Impact",
-        "input_label_2": "Target Market / Country",
-        "input_placeholder_2": "e.g. Brazil",
-        "btn_start": "🔍 Start Investigation",
-        "btn_manual": "📘 User Manual",
-        "status_searching": "Scouring the web for intelligence...",
-        "status_analyzing": "Be Holmes is analyzing market sentiment...",
-        "error_no_key": "❌ Please enter Gemini API Key in sidebar",
-        "error_no_input": "⚠️ Please provide both Product Name and Market",
-        "manual_title": "📘 User Manual",
-        "manual_content": """
-        ### 🕵️‍♂️ What is Be Holmes?
-        An AI agent designed for **Overseas Publishing PMs**. It acts as a senior analyst, uncovering competitor insights in 30 seconds.
-        
-        ### 🚀 Core Features
-        1. **Sentiment Recon:** Scans Reddit, Social Media, and Reviews.
-        2. **Pain Point Detection:** Finds what local users hate about your competitor (your opportunity).
-        3. **Localization Check:** Analyzes cultural fit and adaptation needs.
-        
-        ### 🛠️ How to Use
-        1. Enter API Key on the left.
-        2. Input **Competitor Name** (e.g., PUBG Mobile).
-        3. Input **Target Country** (e.g., India).
-        4. Click Investigate to get a professional strategy report.
-        """,
-        "report_title": "📝 Case File:",
-        "install_hint": "💡 Note: Web search module missing. Running in Knowledge Mode. Run 'pip install duckduckgo-search' for live data."
-    }
-}
 
-# ================= 🧠 4. 核心逻辑引擎 =================
+# ================= 🔐 3. KEY MANAGEMENT =================
+active_key = None
 
-def search_web_intelligence(product, market, lang_code):
-    """
-    搜索引擎：利用 DuckDuckGo 抓取实时网页快照
-    """
-    if not SEARCH_AVAILABLE:
-        return None 
-    
-    results = []
-    queries = [
-        f"{product} {market} user reviews reddit",
-        f"{product} {market} biggest complaints problems",
-        f"{product} {market} marketing strategy analysis",
-        f"{product} {market} local cultural adaptation"
-    ]
-    
+# ================= 📊 4. DATA NORMALIZATION =================
+def normalize_market_data(m):
     try:
-        with DDGS() as ddgs:
-            for q in queries:
-                r = list(ddgs.text(q, max_results=2))
-                if r:
-                    for item in r:
-                        results.append(f"- Source: {item['title']}\n  Snippet: {item['body']}")
-                time.sleep(0.5) 
-    except Exception as e:
-        print(f"Search Error: {e}")
+        if m.get('closed'): return None
+        title = m.get('question', m.get('title', 'Unknown Market'))
+        slug = m.get('slug', '')
+        outcomes = m.get('outcomes', [])
+        prices = m.get('outcomePrices', [])
+        odds_display = " | ".join([f"{o}: {float(p)*100:.1f}%" for o, p in zip(outcomes, prices)]) if outcomes and prices else "N/A"
+        volume = float(m.get('volume', 0))
+        return {"title": title, "odds": odds_display, "slug": slug, "volume": volume, "id": m.get('id')}
+    except:
         return None
-        
-    return "\n".join(results)
 
-def generate_agent_report(product, market, search_data, api_key, lang_mode):
+
+# ================= 📡 5. CORE SEARCH ENGINE =================
+def search_polymarket_native(keywords):
     """
-    AI 大脑：基于搜索结果生成专业报告
+    ✅ 使用 Polymarket GraphQL 接口的 searchMarkets()，可模糊匹配标题
     """
+    results, seen = [], set()
+    url = "https://api.polymarket.com/graphql"
+
+    for kw in keywords:
+        if not kw:
+            continue
+
+        payload = {
+            "query": """
+            query SearchMarkets($term: String!) {
+              searchMarkets(term: $term, limit: 50) {
+                id
+                question
+                slug
+                outcomes
+                outcomePrices
+                volume
+                closed
+              }
+            }
+            """,
+            "variables": {"term": kw}
+        }
+
+        try:
+            resp = requests.post(url, json=payload, headers={"User-Agent": "BeHolmes/1.0"}, timeout=6)
+            if resp.status_code == 200:
+                data = resp.json().get("data", {}).get("searchMarkets", [])
+                for m in data:
+                    p = normalize_market_data(m)
+                    if p and p['slug'] not in seen:
+                        results.append(p)
+                        seen.add(p['slug'])
+        except Exception as e:
+            print("GraphQL Search Error:", e)
+
+    # Dome 兜底方案（冷门市场或 GraphQL 不稳定时）
+    if not results and DOME_API_KEY:
+        try:
+            url_dome = "https://api.domeapi.io/v1/polymarket/markets"
+            r = requests.get(url_dome, headers={"Authorization": f"Bearer {DOME_API_KEY}"}, params={"limit": 100}, timeout=6)
+            if r.status_code == 200:
+                for m in r.json():
+                    p = normalize_market_data(m)
+                    if p:
+                        for kw in keywords:
+                            if kw.lower() in p['title'].lower() or kw.lower() in p['slug']:
+                                if p['slug'] not in seen:
+                                    results.append(p)
+                                    seen.add(p['slug'])
+        except Exception as e:
+            print("Dome fallback error:", e)
+
+    results.sort(key=lambda x: x['volume'], reverse=True)
+    return results
+
+
+# ================= 🧠 6. AI EXTRACTION =================
+def extract_search_terms_ai(user_text, key):
     try:
-        genai.configure(api_key=api_key)
+        genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
-        
-        output_lang = "Chinese (Professional Business Tone)" if lang_mode == "CN" else "English (Professional Business Tone)"
-        
-        context_prompt = ""
-        if search_data:
-            context_prompt = f"Here is the collected LIVE WEB INTELLIGENCE:\n{search_data}\n"
-        else:
-            context_prompt = "Note: Live search is unavailable. Use your internal knowledge base to analyze this product deeply."
+        prompt = f"Extract ONE most relevant English keyword for market search. Input: '{user_text}'. Output only the keyword."
+        response = model.generate_content(prompt)
+        return [response.text.strip()]
+    except:
+        return [user_text]
+
+
+# ================= 🤖 7. HOLMES INTELLIGENCE =================
+def consult_holmes(user_evidence, market_list, key):
+    try:
+        genai.configure(api_key=key)
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        markets_text = "\n".join([f"- {m['title']} [Odds: {m['odds']}]" for m in market_list[:15]])
 
         prompt = f"""
-        Role: You are **Be Holmes**, a Senior Strategy Consultant for Tencent Games/Apps Overseas Publishing.
+        Role: **Be Holmes**, Senior Hedge Fund Strategist.
+        [User Input]: "{user_evidence}"
+        [Market Data Found]: 
+        {markets_text}
+
+        **INSTRUCTION:**
+        Identify the market that best matches the user's input.
+        If the input mentions "SpaceX IPO", look for markets related to "IPO", "Market Cap", or "Public".
         
-        Task: Analyze the competitor **'{product}'** in the **'{market}'** market.
-        
-        {context_prompt}
-        
-        **Objective:**
-        Produce a strategic "Competitor Analysis Report" in **{output_lang}**.
-        
-        **Report Structure (Strictly follow this Markdown format):**
-        
-        ## 🕵️‍♂️ Executive Summary (一句话核心结论)
-        [Summarize the product's status in this market in 2 sentences.]
-        
+        **OUTPUT (Markdown):**
         ---
-        
-        ### 1. 📉 User Pain Points (致命弱点 - 我们的机会)
-        * [Point 1]: [Detail based on Reddit/Review sentiment]
-        * [Point 2]: [Detail]
-        * [Point 3]: [Detail]
-        
-        ### 2. ❤️ Why They Succeed (竞品优势)
-        * [Analysis of their localization or marketing strength]
-        
-        ### 3. 🗺️ Cultural & Localization Insights (本地化洞察)
-        * [Cultural Fit Analysis]
-        * [Payment/Device/Network constraints in {market}]
-        
-        ### 4. 💡 Strategic Advice for Us (给发行团队的建议)
-        > [Actionable advice for a PM entering this market. Be specific.]
+        ### 🕵️‍♂️ Case File: [Best Match Title]
+        <div class="ticker-box">🔥 LIVE SNAPSHOT: [Insert Odds]</div>
+
+        **1. ⚖️ The Verdict**
+        - **Signal:** 🟢 BUY / 🔴 SELL / ⚠️ WAIT
+        - **Confidence:** [0-100]%
+
+        **2. 🧠 Deep Logic**
+        > [Analysis in Input Language]
+
+        **3. 🛡️ Execution**
+        - [Action Plan]
+        ---
         """
-        
         response = model.generate_content(prompt)
-        return response.text
+        btn_html = """<br><a href='https://polymarket.com/' target='_blank' style='text-decoration:none;'><button class='execute-btn'>🚀 EXECUTE TRADE</button></a>"""
+        return response.text + btn_html
     except Exception as e:
-        return f"❌ Analysis Failed: {str(e)}"
+        return f"❌ Intelligence Error: {str(e)}"
 
-# ================= 🖥️ 5. 主界面布局 =================
 
-# --- 侧边栏 ---
+# ================= 🖥️ 8. MAIN UI =================
 with st.sidebar:
-    lang_choice = st.radio("Language / 语言", ["CN", "EN"], horizontal=True)
-    L = LANG[lang_choice] 
-    
-    st.markdown(f"## {L['sidebar_title']}")
-    
-    with st.expander(f"🔑 {L['api_label']}", expanded=True):
-        st.caption(L['api_help'])
+    st.markdown("## 💼 DETECTIVE'S TOOLKIT")
+    with st.expander("🔑 API Key Settings", expanded=True):
         user_api_key = st.text_input("Gemini Key", type="password")
-        if not SEARCH_AVAILABLE:
-            st.warning(L['install_hint'])
-    
+        st.markdown("[Get Free Key](https://aistudio.google.com/app/apikey)")
+        st.caption("✅ Native GraphQL Search Enabled")
+
+    if user_api_key:
+        active_key = user_api_key
+        st.success("🔓 Gemini: Active")
+    elif "GEMINI_KEY" in st.secrets:
+        active_key = st.secrets["GEMINI_KEY"]
+        st.info("🔒 System Key Active")
+    else:
+        st.error("⚠️ Gemini Key Missing!")
+        st.stop()
+
     st.markdown("---")
-    st.markdown("### 🌟 About")
-    st.caption("Powered by Gemini 2.5 & DuckDuckGo")
-    st.caption("Designed for Global Publishing PMs")
+    st.caption("🌊 Live Feed (Top 5)")
+    try:
+        r = requests.get("https://gamma-api.polymarket.com/markets?limit=5&closed=false&sort=volume").json()
+        for m in r:
+            p = normalize_market_data(m)
+            if p:
+                st.caption(f"📅 {p['title']}")
+                st.code(f"{p['odds']}")
+    except:
+        st.error("⚠️ Stream Offline")
 
-# --- 主舞台 ---
-c1, c2 = st.columns([3, 1])
-with c1:
-    st.title(L['title'])
-    st.markdown(f"**{L['subtitle']}**")
 
-with c2:
-    if st.button(L['btn_manual']):
-        @st.dialog(L['manual_title'])
-        def show_manual():
-            st.markdown(L['manual_content'])
-        show_manual()
-
+# --- Main Stage ---
+st.title("Be Holmes")
+st.caption("EVENT-DRIVEN INTELLIGENCE | V2.0 GRAPHQL UPGRADE")
 st.markdown("---")
 
-# 输入表单
-with st.container():
-    col1, col2 = st.columns(2)
-    with col1:
-        product_name = st.text_input(L['input_label_1'], placeholder=L['input_placeholder_1'])
-    with col2:
-        target_market = st.text_input(L['input_label_2'], placeholder=L['input_placeholder_2'])
+user_news = st.text_area("Input Evidence...", height=150, label_visibility="collapsed", placeholder="Input news... (e.g. SpaceX IPO)")
+ignite_btn = st.button("🔍 INVESTIGATE", use_container_width=True)
 
-    start_btn = st.button(L['btn_start'], use_container_width=True)
-
-if start_btn:
-    if not user_api_key:
-        st.error(L['error_no_key'])
-    elif not product_name or not target_market:
-        st.warning(L['error_no_input'])
+if ignite_btn:
+    if not user_news:
+        st.warning("⚠️ Evidence required.")
     else:
-        with st.status(L['status_searching'], expanded=True) as status:
-            st.write(f"🌐 Scouring the web for: {product_name} + {target_market}...")
-            
-            search_results = search_web_intelligence(product_name, target_market, lang_choice)
-            
-            if search_results:
-                st.success("✅ Intelligence Acquired from Web.")
+        with st.status("🚀 Initiating Broad Search...", expanded=True) as status:
+            st.write("🧠 Extracting core keyword...")
+            keywords = extract_search_terms_ai(user_news, active_key)
+            st.write(f"🔑 Searching for: '{keywords[0]}'")
+
+            st.write(f"🌊 Scanning Polymarket (GraphQL Search)...")
+            sonar_markets = search_polymarket_native(keywords)
+
+            if sonar_markets:
+                st.success(f"✅ FOUND: {len(sonar_markets)} markets relevant to '{keywords[0]}'.")
             else:
-                if not SEARCH_AVAILABLE:
-                    st.info("⚡ Using AI Internal Knowledge (Fast Mode).")
-                else:
-                    st.warning("⚠️ Web search timed out, relying on AI memory.")
-            
-            st.write("🧠 Holmes is connecting the dots...")
-            report = generate_agent_report(product_name, target_market, search_results, user_api_key, lang_choice)
-            
+                st.error("⚠️ No relevant markets found.")
+            st.write("⚖️ Calculating Alpha...")
             status.update(label="✅ Investigation Complete", state="complete", expanded=False)
 
-        st.markdown(f"### {L['report_title']} {product_name} @ {target_market}")
-        st.markdown(f"""<div class="report-card">{report}</div>""", unsafe_allow_html=True)
+        if sonar_markets:
+            with st.spinner(">> Deducing Alpha..."):
+                result = consult_holmes(user_news, sonar_markets, active_key)
+                st.markdown("---")
+                st.markdown("### 📝 INVESTIGATION REPORT")
+                st.markdown(result, unsafe_allow_html=True)
