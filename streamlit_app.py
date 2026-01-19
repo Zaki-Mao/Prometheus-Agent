@@ -2,7 +2,6 @@ import streamlit as st
 import requests
 import json
 import google.generativeai as genai
-import re
 
 # ================= 🕵️‍♂️ 1. SYSTEM CONFIGURATION =================
 st.set_page_config(
@@ -12,20 +11,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 🔥 DOME KEY (已内置)
+# 🔥 DOME KEY (保留作为备用)
 DOME_API_KEY = "6f08669ca2c6a9541f0ef1c29e5928d2dc22857b"
-
-# 🔥 FAIL-SAFE DICTIONARY (已更新 2025/2026 新合约)
-KNOWN_SLUGS = {
-    "spacex": [
-        "will-spacex-ipo-in-2025", 
-        "spacex-ipo-2025", 
-        "will-spacex-ipo-in-2026"
-    ],
-    "starlink": ["will-starlink-ipo-in-2025", "starlink-ipo-2025"],
-    "trump": ["presidential-election-winner-2028", "will-donald-trump-remain-president"],
-    "gpt": ["chatgpt-5-release-in-2025", "will-gpt-5-be-released-in-2025"]
-}
 
 # ================= 🎨 2. UI DESIGN (V1.0 BASELINE) =================
 st.markdown("""
@@ -65,7 +52,7 @@ st.markdown("""
 # ================= 🔐 3. KEY MANAGEMENT =================
 active_key = None
 
-# ================= 📡 4. DATA ENGINE (V1.5: HYBRID FAILSAFE) =================
+# ================= 📡 4. DATA ENGINE (V1.7: NATIVE BROAD SEARCH) =================
 
 def normalize_market_data(m):
     try:
@@ -73,6 +60,7 @@ def normalize_market_data(m):
         slug = m.get('market_slug', m.get('slug', ''))
         title = m.get('question', m.get('title', 'Unknown Market'))
         
+        # Odds Parsing
         odds_display = "N/A"
         try:
             raw_outcomes = m.get('outcomes', '["Yes", "No"]')
@@ -84,73 +72,99 @@ def normalize_market_data(m):
             if prices and len(prices) == len(outcomes):
                 for o, p in zip(outcomes, prices):
                     val = float(p) * 100
-                    if val > 0.1: odds_list.append(f"{o}: {val:.1f}%")
+                    # Show all odds, don't filter small ones
+                    odds_list.append(f"{o}: {val:.1f}%")
             odds_display = " | ".join(odds_list)
         except: pass
         
         volume = float(m.get('volume', 0))
+        # 移除 Volume 过滤，确保能搜到新上线的冷门市场
+        
         return {"title": title, "odds": odds_display, "slug": slug, "volume": volume, "id": m.get('id')}
     except: return None
 
-# --- Engine 1: Dome Exact Match ---
-def search_dome_forced(keywords):
-    results = []
-    seen = set()
-    url = "https://api.domeapi.io/v1/polymarket/markets"
-    headers = {"Authorization": f"Bearer {DOME_API_KEY}"}
-
-    for kw in keywords:
-        # Check Hardcoded Slugs
-        for known_key, slug_list in KNOWN_SLUGS.items():
-            if known_key in kw.lower():
-                for target_slug in slug_list:
-                    try:
-                        resp = requests.get(url, headers=headers, params={"market_slug": target_slug}, timeout=3)
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            items = data if isinstance(data, list) else [data]
-                            for m in items:
-                                p = normalize_market_data(m)
-                                if p and p['slug'] not in seen:
-                                    p['title'] = "🔥 [DOME HIT] " + p['title']
-                                    results.append(p)
-                                    seen.add(p['slug'])
-                    except: pass
-    return results
-
-# --- Engine 2: Native Fuzzy Search (The Savior) ---
-def search_native_gamma(keywords):
+def search_polymarket_native(keywords):
     """
-    如果 Dome 没找到，使用原生 API 进行模糊搜索 (SpaceX -> Will SpaceX...)
+    🔥 V1.7 核心: 模仿官网搜索逻辑
+    直接调用 Gamma API 的模糊搜索，不加任何奇怪的过滤器。
     """
     results = []
     seen = set()
+    
+    # 1. Search Markets (Direct Contracts)
+    # 你的截图里是 Markets 搜索结果
+    url_m = "https://gamma-api.polymarket.com/markets"
+    
     for kw in keywords:
         if not kw: continue
+        # 关键参数：sort=volume (按热度排), limit=50 (多抓点), closed=false
+        params = {
+            "q": kw,
+            "limit": 50,
+            "closed": "false",
+            "sort": "volume"
+        }
         try:
-            # 原生 API 支持 q= 模糊搜索
-            url = f"https://gamma-api.polymarket.com/markets?q={kw}&limit=20&closed=false&sort=volume"
-            resp = requests.get(url, headers={"User-Agent": "BeHolmes/1.0"}, timeout=5)
+            resp = requests.get(url_m, params=params, headers={"User-Agent": "BeHolmes/1.0"}, timeout=4)
             if resp.status_code == 200:
                 data = resp.json()
                 for m in data:
                     p = normalize_market_data(m)
                     if p and p['slug'] not in seen:
-                        p['title'] = "🌐 [NATIVE] " + p['title']
+                        # 你的截图里有 "SpaceX IPO Closing Market Cap"，这个逻辑能抓到它
                         results.append(p)
                         seen.add(p['slug'])
         except: pass
+
+    # 2. Search Events (Topics)
+    # 有时候 "SpaceX" 是作为一个 Event 存在的
+    url_e = "https://gamma-api.polymarket.com/events"
+    for kw in keywords:
+        if not kw: continue
+        try:
+            resp = requests.get(url_e, params={"q": kw, "limit": 20}, headers={"User-Agent": "BeHolmes/1.0"}, timeout=4)
+            if resp.status_code == 200:
+                data = resp.json()
+                for ev in data:
+                    for m in ev.get('markets', []):
+                        p = normalize_market_data(m)
+                        if p and p['slug'] not in seen:
+                            p['title'] = "📂 [EVENT] " + p['title']
+                            results.append(p)
+                            seen.add(p['slug'])
+        except: pass
+        
+    # 3. Dome API Backup (Just in case)
+    if not results and DOME_API_KEY:
+         try:
+            url_dome = "https://api.domeapi.io/v1/polymarket/markets"
+            # Dome 不支持 q=，但我们可以拉取 Top 100 然后本地过滤
+            r = requests.get(url_dome, headers={"Authorization": f"Bearer {DOME_API_KEY}"}, params={"limit": 100}, timeout=4)
+            if r.status_code == 200:
+                for m in r.json():
+                    p = normalize_market_data(m)
+                    if p:
+                        for kw in keywords:
+                            if kw.lower() in p['title'].lower() or kw.lower() in p['slug']:
+                                if p['slug'] not in seen:
+                                    results.append(p)
+                                    seen.add(p['slug'])
+         except: pass
+
+    # 按成交量降序排列，把最火的放在前面
+    results.sort(key=lambda x: x['volume'], reverse=True)
     return results
 
 def extract_search_terms_ai(user_text, key):
-    if not user_text: return []
+    # 简单粗暴，直接提取核心词
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
-        prompt = f"Extract 2 English search keywords. Input: '{user_text}'. Output: KW1, KW2"
+        # 强制 AI 只输出一个最核心的英文词，比如 "SpaceX"
+        prompt = f"Extract ONE core English keyword for search. Input: '{user_text}'. Output: Keyword"
         response = model.generate_content(prompt)
-        return [k.strip() for k in response.text.split(',')]
-    except: return []
+        return [response.text.strip()]
+    except: return [user_text] # AI 挂了就直接用原文
 
 # ================= 🧠 5. INTELLIGENCE LAYER =================
 
@@ -158,7 +172,8 @@ def consult_holmes(user_evidence, market_list, key):
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
-        markets_text = "\n".join([f"- {m['title']} [Odds: {m['odds']}]" for m in market_list])
+        # 只把前 15 个最相关的给 AI，防止 Token 溢出
+        markets_text = "\n".join([f"- {m['title']} [Odds: {m['odds']}]" for m in market_list[:15]])
         
         prompt = f"""
         Role: **Be Holmes**, Senior Hedge Fund Strategist.
@@ -166,9 +181,13 @@ def consult_holmes(user_evidence, market_list, key):
         [Market Data Found]: 
         {markets_text}
         
+        **INSTRUCTION:**
+        Identify the market that best matches the user's input.
+        If user asks about "SpaceX IPO", look for markets about "Market Cap", "Public", or "IPO".
+        
         **OUTPUT (Markdown):**
         ---
-        ### 🕵️‍♂️ Case File: [Exact Market Title From Data]
+        ### 🕵️‍♂️ Case File: [Best Match Title]
         <div class="ticker-box">🔥 LIVE SNAPSHOT: [Insert Odds]</div>
         
         **1. ⚖️ The Verdict**
@@ -194,7 +213,7 @@ with st.sidebar:
     with st.expander("🔑 API Key Settings", expanded=True):
         user_api_key = st.text_input("Gemini Key", type="password")
         st.markdown("[Get Free Key](https://aistudio.google.com/app/apikey)")
-        st.caption("✅ Dome API: Connected")
+        st.caption("✅ Native Search: Enabled")
 
     if user_api_key:
         active_key = user_api_key
@@ -207,11 +226,11 @@ with st.sidebar:
         st.stop()
 
     st.markdown("---")
-    st.markdown("### 🌊 Market Sonar (Top 5)")
+    st.caption("🌊 Live Feed (Top 5)")
     try:
-        sb_url = "https://api.domeapi.io/v1/polymarket/markets"
-        sb_data = requests.get(sb_url, headers={"Authorization": f"Bearer {DOME_API_KEY}"}, params={"limit": 5}, timeout=3).json()
-        for m in sb_data:
+        # 侧边栏显示全网最热，确保连接正常
+        r = requests.get("https://gamma-api.polymarket.com/markets?limit=5&closed=false&sort=volume").json()
+        for m in r:
             p = normalize_market_data(m)
             if p:
                 st.caption(f"📅 {p['title']}")
@@ -220,7 +239,7 @@ with st.sidebar:
 
 # --- Main Stage ---
 st.title("Be Holmes")
-st.caption("EVENT-DRIVEN INTELLIGENCE | V1.5 HYBRID ENGINE") 
+st.caption("EVENT-DRIVEN INTELLIGENCE | V1.7 REAL-TIME SEARCH") 
 st.markdown("---")
 
 user_news = st.text_area("Input Evidence...", height=150, label_visibility="collapsed", placeholder="Input news... (e.g. SpaceX IPO)")
@@ -230,25 +249,17 @@ if ignite_btn:
     if not user_news:
         st.warning("⚠️ Evidence required.")
     else:
-        with st.status("🚀 Initiating Search Protocol...", expanded=True) as status:
-            st.write("🧠 Extracting intent...")
+        with st.status("🚀 Initiating Broad Search...", expanded=True) as status:
+            st.write("🧠 Extracting core keyword...")
             keywords = extract_search_terms_ai(user_news, active_key)
+            st.write(f"🔑 Searching for: '{keywords[0]}'")
             
-            # 1. Dome Forced Search
-            st.write(f"🌊 Dome API Scanning (Hotlist)...")
-            sonar_markets = search_dome_forced(keywords)
-            
-            # 2. Native Gamma Fallback (Key Fix!)
-            if not sonar_markets:
-                st.write(f"🌊 Dome miss. Engaging Native Gamma Search (Fuzzy)...")
-                sonar_markets = search_native_gamma(keywords)
+            st.write(f"🌊 Scanning Polymarket (Markets & Events)...")
+            sonar_markets = search_polymarket_native(keywords)
             
             if sonar_markets: 
-                st.write(f"✅ FOUND: {len(sonar_markets)} markets.")
-                # 去重
-                unique_mkts = {m['slug']: m for m in sonar_markets}.values()
-                sonar_markets = list(unique_mkts)
-            else: 
+                st.success(f"✅ FOUND: {len(sonar_markets)} markets relevant to '{keywords[0]}'.")
+            else:
                 st.error("⚠️ No relevant markets found.")
             
             st.write("⚖️ Calculating Alpha...")
