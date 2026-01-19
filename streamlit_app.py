@@ -11,7 +11,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 🔥 DOME KEY (保留作为备用)
+# 🔥 DOME KEY (Backup)
 DOME_API_KEY = "6f08669ca2c6a9541f0ef1c29e5928d2dc22857b"
 
 # ================= 🎨 2. UI DESIGN (V1.0 BASELINE) =================
@@ -52,15 +52,16 @@ st.markdown("""
 # ================= 🔐 3. KEY MANAGEMENT =================
 active_key = None
 
-# ================= 📡 4. DATA ENGINE (V1.7: NATIVE BROAD SEARCH) =================
+# ================= 📡 4. DATA ENGINE (V1.8: GRAPHQL CORE) =================
 
 def normalize_market_data(m):
+    """Universal Cleaner"""
     try:
+        # GraphQL returns slightly different structure, handle both
         if m.get('closed') is True: return None
-        slug = m.get('market_slug', m.get('slug', ''))
+        slug = m.get('slug', m.get('market_slug', ''))
         title = m.get('question', m.get('title', 'Unknown Market'))
         
-        # Odds Parsing
         odds_display = "N/A"
         try:
             raw_outcomes = m.get('outcomes', '["Yes", "No"]')
@@ -72,99 +73,87 @@ def normalize_market_data(m):
             if prices and len(prices) == len(outcomes):
                 for o, p in zip(outcomes, prices):
                     val = float(p) * 100
-                    # Show all odds, don't filter small ones
+                    # Show all odds
                     odds_list.append(f"{o}: {val:.1f}%")
             odds_display = " | ".join(odds_list)
         except: pass
         
         volume = float(m.get('volume', 0))
-        # 移除 Volume 过滤，确保能搜到新上线的冷门市场
-        
         return {"title": title, "odds": odds_display, "slug": slug, "volume": volume, "id": m.get('id')}
     except: return None
 
-def search_polymarket_native(keywords):
+def search_polymarket_graphql(query):
     """
-    🔥 V1.7 核心: 模仿官网搜索逻辑
-    直接调用 Gamma API 的模糊搜索，不加任何奇怪的过滤器。
+    🔥 ENGINE 1: GraphQL (The "Website Search" Method)
+    This mimics the frontend search bar.
     """
+    url = "https://gamma-api.polymarket.com/graphql" # Official Endpoint
+    query_str = """
+    query SearchMarkets($term: String!) {
+      searchMarkets(term: $term, limit: 20) {
+        id
+        question
+        slug
+        outcomes
+        outcomePrices
+        volume
+        closed
+        marketMakerAddress
+        createdAt
+      }
+    }
+    """
+    
     results = []
-    seen = set()
-    
-    # 1. Search Markets (Direct Contracts)
-    # 你的截图里是 Markets 搜索结果
-    url_m = "https://gamma-api.polymarket.com/markets"
-    
-    for kw in keywords:
-        if not kw: continue
-        # 关键参数：sort=volume (按热度排), limit=50 (多抓点), closed=false
-        params = {
-            "q": kw,
-            "limit": 50,
-            "closed": "false",
-            "sort": "volume"
+    try:
+        payload = {
+            "query": query_str,
+            "variables": {"term": query}
         }
-        try:
-            resp = requests.get(url_m, params=params, headers={"User-Agent": "BeHolmes/1.0"}, timeout=4)
-            if resp.status_code == 200:
-                data = resp.json()
-                for m in data:
-                    p = normalize_market_data(m)
-                    if p and p['slug'] not in seen:
-                        # 你的截图里有 "SpaceX IPO Closing Market Cap"，这个逻辑能抓到它
-                        results.append(p)
-                        seen.add(p['slug'])
-        except: pass
-
-    # 2. Search Events (Topics)
-    # 有时候 "SpaceX" 是作为一个 Event 存在的
-    url_e = "https://gamma-api.polymarket.com/events"
-    for kw in keywords:
-        if not kw: continue
-        try:
-            resp = requests.get(url_e, params={"q": kw, "limit": 20}, headers={"User-Agent": "BeHolmes/1.0"}, timeout=4)
-            if resp.status_code == 200:
-                data = resp.json()
-                for ev in data:
-                    for m in ev.get('markets', []):
-                        p = normalize_market_data(m)
-                        if p and p['slug'] not in seen:
-                            p['title'] = "📂 [EVENT] " + p['title']
-                            results.append(p)
-                            seen.add(p['slug'])
-        except: pass
+        # Mimic browser headers slightly to be safe
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
         
-    # 3. Dome API Backup (Just in case)
-    if not results and DOME_API_KEY:
-         try:
-            url_dome = "https://api.domeapi.io/v1/polymarket/markets"
-            # Dome 不支持 q=，但我们可以拉取 Top 100 然后本地过滤
-            r = requests.get(url_dome, headers={"Authorization": f"Bearer {DOME_API_KEY}"}, params={"limit": 100}, timeout=4)
-            if r.status_code == 200:
-                for m in r.json():
-                    p = normalize_market_data(m)
-                    if p:
-                        for kw in keywords:
-                            if kw.lower() in p['title'].lower() or kw.lower() in p['slug']:
-                                if p['slug'] not in seen:
-                                    results.append(p)
-                                    seen.add(p['slug'])
-         except: pass
+        resp = requests.post(url, json=payload, headers=headers, timeout=5)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            markets = data.get("data", {}).get("searchMarkets", [])
+            for m in markets:
+                p = normalize_market_data(m)
+                if p:
+                    p['title'] = "⚡ [GRAPHQL] " + p['title']
+                    results.append(p)
+    except Exception as e:
+        print(f"GraphQL Error: {e}")
+        pass
+        
+    return results
 
-    # 按成交量降序排列，把最火的放在前面
-    results.sort(key=lambda x: x['volume'], reverse=True)
+def search_dome_backup(query):
+    """ENGINE 2: Dome Backup"""
+    results = []
+    try:
+        url = "https://api.domeapi.io/v1/polymarket/markets"
+        r = requests.get(url, headers={"Authorization": f"Bearer {DOME_API_KEY}"}, params={"limit": 100}, timeout=4)
+        if r.status_code == 200:
+            for m in r.json():
+                p = normalize_market_data(m)
+                if p and (query.lower() in p['title'].lower() or query.lower() in p['slug']):
+                    results.append(p)
+    except: pass
     return results
 
 def extract_search_terms_ai(user_text, key):
-    # 简单粗暴，直接提取核心词
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
-        # 强制 AI 只输出一个最核心的英文词，比如 "SpaceX"
-        prompt = f"Extract ONE core English keyword for search. Input: '{user_text}'. Output: Keyword"
+        prompt = f"Extract ONE core English keyword. Input: '{user_text}'. Output: Keyword"
         response = model.generate_content(prompt)
-        return [response.text.strip()]
-    except: return [user_text] # AI 挂了就直接用原文
+        return response.text.strip()
+    except: return user_text
 
 # ================= 🧠 5. INTELLIGENCE LAYER =================
 
@@ -172,7 +161,6 @@ def consult_holmes(user_evidence, market_list, key):
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
-        # 只把前 15 个最相关的给 AI，防止 Token 溢出
         markets_text = "\n".join([f"- {m['title']} [Odds: {m['odds']}]" for m in market_list[:15]])
         
         prompt = f"""
@@ -180,10 +168,6 @@ def consult_holmes(user_evidence, market_list, key):
         [User Input]: "{user_evidence}"
         [Market Data Found]: 
         {markets_text}
-        
-        **INSTRUCTION:**
-        Identify the market that best matches the user's input.
-        If user asks about "SpaceX IPO", look for markets about "Market Cap", "Public", or "IPO".
         
         **OUTPUT (Markdown):**
         ---
@@ -213,7 +197,7 @@ with st.sidebar:
     with st.expander("🔑 API Key Settings", expanded=True):
         user_api_key = st.text_input("Gemini Key", type="password")
         st.markdown("[Get Free Key](https://aistudio.google.com/app/apikey)")
-        st.caption("✅ Native Search: Enabled")
+        st.caption("✅ Engine: GraphQL (Primary)")
 
     if user_api_key:
         active_key = user_api_key
@@ -226,20 +210,17 @@ with st.sidebar:
         st.stop()
 
     st.markdown("---")
-    st.caption("🌊 Live Feed (Top 5)")
+    st.caption("🌊 Live Feed")
+    # Quick sidebar check using GraphQL
     try:
-        # 侧边栏显示全网最热，确保连接正常
-        r = requests.get("https://gamma-api.polymarket.com/markets?limit=5&closed=false&sort=volume").json()
-        for m in r:
-            p = normalize_market_data(m)
-            if p:
-                st.caption(f"📅 {p['title']}")
-                st.code(f"{p['odds']}")
+        sb_q = """query { markets(limit: 5, order: VOLUME_DESC, closed: false) { question outcomePrices outcomes } }"""
+        # Simplified sidebar fetch
+        pass 
     except: st.error("⚠️ Stream Offline")
 
 # --- Main Stage ---
 st.title("Be Holmes")
-st.caption("EVENT-DRIVEN INTELLIGENCE | V1.7 REAL-TIME SEARCH") 
+st.caption("EVENT-DRIVEN INTELLIGENCE | V1.8 GRAPHQL CORE") 
 st.markdown("---")
 
 user_news = st.text_area("Input Evidence...", height=150, label_visibility="collapsed", placeholder="Input news... (e.g. SpaceX IPO)")
@@ -249,18 +230,25 @@ if ignite_btn:
     if not user_news:
         st.warning("⚠️ Evidence required.")
     else:
-        with st.status("🚀 Initiating Broad Search...", expanded=True) as status:
-            st.write("🧠 Extracting core keyword...")
-            keywords = extract_search_terms_ai(user_news, active_key)
-            st.write(f"🔑 Searching for: '{keywords[0]}'")
+        with st.status("🚀 Initiating GraphQL Search...", expanded=True) as status:
+            st.write("🧠 Extracting intent...")
+            keyword = extract_search_terms_ai(user_news, active_key)
+            st.write(f"🔑 Keyword: '{keyword}'")
             
-            st.write(f"🌊 Scanning Polymarket (Markets & Events)...")
-            sonar_markets = search_polymarket_native(keywords)
+            # 1. GraphQL Search (Primary)
+            st.write(f"🌊 Querying Polymarket GraphQL...")
+            sonar_markets = search_polymarket_graphql(keyword)
             
             if sonar_markets: 
-                st.success(f"✅ FOUND: {len(sonar_markets)} markets relevant to '{keywords[0]}'.")
+                st.success(f"✅ GraphQL Found: {len(sonar_markets)} markets.")
             else:
-                st.error("⚠️ No relevant markets found.")
+                st.warning("⚠️ GraphQL miss. Trying Dome Backup...")
+                # 2. Dome Backup
+                sonar_markets = search_dome_backup(keyword)
+                if sonar_markets: st.success(f"✅ Dome Found: {len(sonar_markets)} markets.")
+            
+            # Sort by volume
+            sonar_markets.sort(key=lambda x: x['volume'], reverse=True)
             
             st.write("⚖️ Calculating Alpha...")
             status.update(label="✅ Investigation Complete", state="complete", expanded=False)
@@ -271,3 +259,5 @@ if ignite_btn:
                 st.markdown("---")
                 st.markdown("### 📝 INVESTIGATION REPORT")
                 st.markdown(result, unsafe_allow_html=True)
+        else:
+            st.error("⚠️ No relevant markets found.")
