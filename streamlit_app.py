@@ -5,7 +5,6 @@ import google.generativeai as genai
 import re
 
 # ================= 🔑 0. API KEY CONFIG (HARDCODED) =================
-# 你提供的 Exa Key 已内置
 EXA_API_KEY = "2b15f3e3-0787-4bdc-99c9-9e17aade05c2"
 
 # ================= 🛠️ 核心依赖检测 =================
@@ -74,7 +73,7 @@ st.markdown("""
 
 def search_with_exa(query):
     """
-    使用内置 Key 进行 Exa 搜索
+    使用内置 Key 进行 Exa 搜索 (已修复参数报错)
     """
     if not EXA_AVAILABLE:
         st.error("❌ 'exa_py' library missing. Check requirements.txt")
@@ -87,15 +86,13 @@ def search_with_exa(query):
         # 初始化 Exa
         exa = Exa(EXA_API_KEY)
         
-        # 核心搜索逻辑
-        # 1. include_domains: 锁定官网
-        # 2. neural: 开启语义理解
+        # 修复点：移除了 'use_autoprompt' 参数
+        # 依然只搜 polymarket.com
         search_response = exa.search(
             f"prediction market about {query}",
             num_results=5,
             type="neural",
-            include_domains=["polymarket.com"],
-            use_autoprompt=True
+            include_domains=["polymarket.com"]
         )
         
         for result in search_response.results:
@@ -224,7 +221,7 @@ with st.sidebar:
         st.error("❌ 'exa_py' Missing")
 
 st.title("Be Holmes")
-st.caption("EXA SNIPER EDITION | V12.0")
+st.caption("EXA SNIPER EDITION | V12.1 FIXED")
 st.markdown("---")
 
 user_news = st.text_area("Input Evidence...", height=100, label_visibility="collapsed", placeholder="e.g. Will Musk launch Starship soon?")
@@ -240,13 +237,13 @@ if ignite_btn:
         with st.status("🎯 Exa Sniper Locking Target...", expanded=True) as status:
             st.write(f"Scanning polymarket.com via Exa.ai for '{user_news}'...")
             
-            # 使用硬编码的 Key 进行搜索
+            # 使用修复后的函数
             matches = search_with_exa(user_news)
             
             if matches:
                 st.write(f"✅ Hit! Found {len(matches)} markets.")
             else:
-                st.warning("⚠️ No markets found via Exa.")
+                st.warning("⚠️ No markets found via Exa (SPA Indexing Limit).")
             
             st.write("⚖️ Holmes Analyzing...")
             report = consult_holmes(user_news, matches, active_gemini_key)
