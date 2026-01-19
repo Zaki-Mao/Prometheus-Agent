@@ -132,14 +132,29 @@ def search_polymarket_native(keywords):
 
 # ================= 🧠 6. AI EXTRACTION =================
 def extract_search_terms_ai(user_text, key):
+    """
+    改进版：保留品牌/实体词和主题词，避免漏掉 SpaceX。
+    """
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
-        prompt = f"Extract ONE most relevant English keyword for market search. Input: '{user_text}'. Output only the keyword."
+        prompt = f"""
+        Extract up to TWO short English keywords from the input that best describe the market topic.
+        Keep both entity names (like SpaceX, Trump, Ethereum) and event type words (like IPO, Election).
+        Output them as a comma-separated list. Example:
+        Input: "SpaceX IPO" → Output: SpaceX, IPO
+        Input: "Trump reelection odds" → Output: Trump, reelection
+        Input: "{user_text}" → Output:
+        """
         response = model.generate_content(prompt)
-        return [response.text.strip()]
-    except:
+        # 拆分并去除空格
+        kws = [w.strip() for w in response.text.split(",") if w.strip()]
+        # 至少保底返回原文本
+        return kws if kws else [user_text]
+    except Exception as e:
+        print("Keyword extraction error:", e)
         return [user_text]
+
 
 
 # ================= 🤖 7. HOLMES INTELLIGENCE =================
@@ -246,3 +261,4 @@ if ignite_btn:
                 st.markdown("---")
                 st.markdown("### 📝 INVESTIGATION REPORT")
                 st.markdown(result, unsafe_allow_html=True)
+
