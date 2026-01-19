@@ -15,14 +15,14 @@ st.set_page_config(
 # 🔥 DOME KEY (Backup)
 DOME_API_KEY = "6f08669ca2c6a9541f0ef1c29e5928d2dc22857b"
 
-# 🔥 FAIL-SAFE: If API fails, these will load
+# 🔥 FAIL-SAFE MARKETS
 KNOWN_MARKETS = {
-    "spacex": ["spacex-ipo-closing-market-cap", "will-spacex-ipo-in-2025"],
+    "spacex": ["spacex-ipo-closing-market-cap"],
     "trump": ["presidential-election-winner-2028"],
     "gpt": ["chatgpt-5-release-in-2025"]
 }
 
-# ================= 🎨 2. UI DESIGN (Default English / Magma Red) =================
+# ================= 🎨 2. UI DESIGN (Dark/Magma) =================
 st.markdown("""
 <style>
     [data-testid="stToolbar"] { visibility: hidden; height: 0%; position: fixed; }
@@ -70,31 +70,27 @@ def detect_language(text):
     return "ENGLISH"
 
 def extract_search_terms_ai(user_text, key):
-    """Extract ONE core English keyword (e.g., 'SpaceX') regardless of input language"""
+    """Extract ONE core English keyword"""
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         prompt = f"""
         Extract the SINGLE most important search entity (English only).
-        Ignore stop words.
         Input: "{user_text}"
         Output (Word only):
         """
         response = model.generate_content(prompt)
-        # Clean up
-        keyword = response.text.strip().replace('"', '').replace("'", "")
-        return keyword
+        return response.text.strip().replace('"', '').replace("'", "")
     except: return user_text.split()[0]
 
-# ================= 📡 5. DATA ENGINE (FETCH 500 + LOCAL FILTER) =================
+# ================= 📡 5. DATA ENGINE (DEEP SCAN) =================
 
 def normalize_market_data(m):
     try:
         if m.get('closed') is True: return None
-        title = m.get('question', m.get('title', 'Unknown Market'))
+        title = m.get('question', m.get('title', 'Unknown'))
         slug = m.get('slug', m.get('market_slug', ''))
         
-        # Odds Logic
         odds_display = "N/A"
         try:
             raw_outcomes = m.get('outcomes', '["Yes", "No"]')
@@ -115,38 +111,24 @@ def normalize_market_data(m):
     except: return None
 
 def search_polymarket_deep_scan(keyword):
-    """
-    🔥 STRATEGY: Fetch Top 500 Markets -> Local Python Filter
-    This is more robust than the API's fuzzy search.
-    """
+    """Fetch Top 500 -> Local Filter"""
     results = []
     seen = set()
-    
-    # 1. API: Fetch Top 500 by Volume (The "Big Net" Approach)
-    # We fetch broadly, then filter strictly locally
     url = "https://gamma-api.polymarket.com/markets"
-    params = {
-        "limit": 500, # Grab a huge chunk
-        "closed": "false",
-        "sort": "volume"
-    }
+    params = {"limit": 500, "closed": "false", "sort": "volume"}
     
     try:
-        resp = requests.get(url, params=params, timeout=8)
+        resp = requests.get(url, params=params, timeout=6)
         if resp.status_code == 200:
-            all_markets = resp.json()
-            for m in all_markets:
+            for m in resp.json():
                 p = normalize_market_data(m)
                 if p and p['slug'] not in seen:
-                    # LOCAL MATCHING: Check if keyword is in title or slug
-                    # This avoids API search limitations
                     if keyword.lower() in p['title'].lower() or keyword.lower() in p['slug']:
                         results.append(p)
                         seen.add(p['slug'])
-    except Exception as e:
-        print(f"Deep Scan Error: {e}")
+    except Exception as e: print(e)
 
-    # 2. FAIL-SAFE: Check Hardcoded Dictionary (If API missed it)
+    # Fail-safe
     if not results:
         for k, slugs in KNOWN_MARKETS.items():
             if k in keyword.lower():
@@ -156,60 +138,74 @@ def search_polymarket_deep_scan(keyword):
                         for m in r:
                             p = normalize_market_data(m)
                             if p and p['slug'] not in seen:
-                                p['title'] = "🔥 [HOT] " + p['title']
                                 results.append(p)
                                 seen.add(p['slug'])
                     except: pass
 
-    # Sort by volume (liquidity first)
     results.sort(key=lambda x: x['volume'], reverse=True)
     return results
 
-# ================= 🤖 6. AI ANALYST (AUTO-LANGUAGE) =================
+# ================= 🤖 6. AI ANALYST (ALWAYS ON) =================
 
 def consult_holmes(user_input, market_data, key):
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # Detect Language
+        # 1. 语言检测
         lang_mode = detect_language(user_input)
-        target_lang_instruction = "Respond in **CHINESE (中文)**." if lang_mode == "CHINESE" else "Respond in **ENGLISH**."
-        
-        markets_text = "\n".join([f"- {m['title']} [Odds: {m['odds']}]" for m in market_data[:10]])
-        
+        if lang_mode == "CHINESE":
+            lang_instruction = "IMPORTANT: Output the entire report in **CHINESE (中文)**."
+            fallback_title = "宏观市场分析 (无特定赌局)"
+            fallback_odds = "暂无 Polymarket 数据"
+        else:
+            lang_instruction = "IMPORTANT: Output the entire report in **ENGLISH**."
+            fallback_title = "Macro Market Analysis (No Specific Bet Found)"
+            fallback_odds = "No direct market data"
+
+        # 2. 构建上下文
+        if market_data:
+            data_context = "\n".join([f"- {m['title']} [Odds: {m['odds']}]" for m in market_data[:10]])
+            snapshot_html = f"<div class='ticker-box'>🔥 LIVE SNAPSHOT: {market_data[0]['odds']}</div>"
+            case_title = market_data[0]['title']
+        else:
+            data_context = "No direct betting markets found on Polymarket for this specific query."
+            snapshot_html = f"<div class='ticker-box' style='border-color: #666;'>⚠️ {fallback_odds}</div>"
+            case_title = fallback_title
+
+        # 3. Prompt (无论有无数据，都必须分析)
         prompt = f"""
         Role: **Be Holmes**, Senior Hedge Fund Strategist.
         
         [User Input]: "{user_input}"
-        [Market Data Found]: 
-        {markets_text}
+        [Market Data]: 
+        {data_context}
         
-        **MANDATORY INSTRUCTION:**
-        1. **Language:** {target_lang_instruction}
-        2. **Analysis:** Match the input to the specific market data.
+        {lang_instruction}
+        
+        **TASK:**
+        Analyze the user's input. 
+        - IF market data exists: Analyze the odds and give a trading signal.
+        - IF NO market data: Provide a deep MACRO analysis of the news itself. Explain the geopolitical or financial impact. Suggest what *would* be a good bet if one existed.
         
         **OUTPUT FORMAT (Markdown):**
         ---
-        ### 🕵️‍♂️ Case File: [Best Match Title]
-        <div class="ticker-box">🔥 LIVE SNAPSHOT: [Insert Odds]</div>
+        ### 🕵️‍♂️ Case File: {case_title}
+        {snapshot_html}
         
         **1. ⚖️ The Verdict**
-        - **Signal:** 🟢 BUY / 🔴 SELL / ⚠️ WAIT
+        - **Signal:** 🟢 BUY / 🔴 SELL / ⚠️ WATCH
         - **Confidence:** [0-100]%
         
         **2. 🧠 Deep Logic**
-        > [Detailed analysis of why the odds are mispriced or correct.]
+        > [Detailed reasoning. If no market data, analyze the news event's impact on sectors/stocks/crypto.]
         
         **3. 🛡️ Execution**
         - [Action Plan]
         ---
         """
         response = model.generate_content(prompt)
-        
-        # Button label adapts slightly or stays English (UI is English)
-        btn_label = "🚀 EXECUTE TRADE"
-        btn_html = f"""<br><a href='https://polymarket.com/' target='_blank' style='text-decoration:none;'><button class='execute-btn'>{btn_label}</button></a>"""
+        btn_html = """<br><a href='https://polymarket.com/' target='_blank' style='text-decoration:none;'><button class='execute-btn'>🚀 EXECUTE TRADE</button></a>"""
         return response.text + btn_html
     except Exception as e: return f"❌ Error: {str(e)}"
 
@@ -220,7 +216,7 @@ with st.sidebar:
     with st.expander("🔑 API Key Settings", expanded=True):
         user_api_key = st.text_input("Gemini Key", type="password")
         st.markdown("[Get Free Key](https://aistudio.google.com/app/apikey)")
-        st.caption("✅ Engine: Deep Scan (Top 500)")
+        st.caption("✅ Mode: Deep Scan + Auto-Analysis")
 
     if user_api_key:
         active_key = user_api_key
@@ -235,7 +231,6 @@ with st.sidebar:
     st.markdown("---")
     st.caption("🌊 Live Feed (Top 3 Vol)")
     try:
-        # Sidebar feed
         r = requests.get("https://gamma-api.polymarket.com/markets?limit=3&closed=false&sort=volume").json()
         for m in r:
             p = normalize_market_data(m)
@@ -246,7 +241,7 @@ with st.sidebar:
 
 # --- Main Stage ---
 st.title("Be Holmes")
-st.caption("EVENT-DRIVEN INTELLIGENCE | V5.0 GLOBAL DETECTIVE") 
+st.caption("EVENT-DRIVEN INTELLIGENCE | V5.1 NO DEAD ENDS") 
 st.markdown("---")
 
 user_news = st.text_area("Input Evidence...", height=150, label_visibility="collapsed", placeholder="Input news or rumors... (e.g. SpaceX IPO)")
@@ -260,24 +255,22 @@ if ignite_btn:
             # 1. Keyword Extraction
             st.write("🧠 Extracting core entity...")
             keyword = extract_search_terms_ai(user_news, active_key)
-            st.write(f"🔑 Target Entity: '{keyword}'")
             
-            # 2. Deep Scan (The "Fetch 500" Strategy)
-            st.write(f"🌊 Scanning Top 500 Markets for matches...")
+            # 2. Deep Scan
+            st.write(f"🌊 Scanning Top 500 Markets for '{keyword}'...")
             sonar_markets = search_polymarket_deep_scan(keyword)
             
             if sonar_markets: 
                 st.success(f"✅ FOUND: {len(sonar_markets)} active markets.")
             else:
-                st.error("⚠️ No direct markets found in Top 500.")
+                st.warning("⚠️ No direct markets found. Switching to MACRO ANALYSIS mode.")
             
-            st.write("⚖️ Calculating Alpha...")
+            st.write("⚖️ Generating Professional Analysis...")
             status.update(label="✅ Investigation Complete", state="complete", expanded=False)
 
-        if sonar_markets:
-            with st.spinner(">> Deducing Alpha..."):
-                # 3. AI Analysis (Language Adaptive)
-                result = consult_holmes(user_news, sonar_markets, active_key)
-                st.markdown("---")
-                st.markdown("### 📝 INVESTIGATION REPORT")
-                st.markdown(result, unsafe_allow_html=True)
+        # 3. ALWAYS generate report, even if markets are empty
+        with st.spinner(">> Deducing Alpha..."):
+            result = consult_holmes(user_news, sonar_markets, active_key)
+            st.markdown("---")
+            st.markdown("### 📝 INVESTIGATION REPORT")
+            st.markdown(result, unsafe_allow_html=True)
