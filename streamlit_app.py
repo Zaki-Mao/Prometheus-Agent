@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import json
 import google.generativeai as genai
-import time
+import re
 
 # ================= 🕵️‍♂️ 1. SYSTEM CONFIGURATION =================
 st.set_page_config(
@@ -15,31 +15,72 @@ st.set_page_config(
 # ================= 🎨 2. UI DESIGN (Magma Red) =================
 st.markdown("""
 <style>
+    /* --- HIDE SYSTEM ELEMENTS --- */
     [data-testid="stToolbar"] { visibility: hidden; height: 0%; position: fixed; }
     footer { visibility: hidden; }
     header { visibility: hidden; }
+
+    /* --- Global Background --- */
     .stApp { background-color: #050505; font-family: 'Roboto Mono', monospace; }
     [data-testid="stSidebar"] { background-color: #000000; border-right: 1px solid #1a1a1a; }
+    
+    /* --- Typography --- */
     h1 { 
         background: linear-gradient(90deg, #FF4500, #E63946); 
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        font-family: 'Georgia', serif; font-weight: 800;
-        border-bottom: 2px solid #331111; padding-bottom: 15px;
+        font-family: 'Georgia', serif; 
+        font-weight: 800;
+        border-bottom: 2px solid #331111; 
+        padding-bottom: 15px;
+        text-shadow: 0 0 20px rgba(255, 69, 0, 0.2);
     }
+    
     h3 { color: #FF7F50 !important; } 
     p, label, .stMarkdown, .stText, li, div, span { color: #A0A0A0 !important; }
     strong { color: #FFF !important; font-weight: 600; } 
-    .stTextArea textarea, .stNumberInput input, .stTextInput input { 
-        background-color: #0A0A0A !important; color: #E63946 !important; 
-        border: 1px solid #333 !important; border-radius: 6px;
+    a { text-decoration: none !important; border-bottom: none !important; }
+
+    /* --- Inputs --- */
+    .stTextArea textarea, .stNumberInput input, .stTextInput input, .stSelectbox div[data-baseweb="select"] { 
+        background-color: #0A0A0A !important; 
+        color: #E63946 !important; 
+        border: 1px solid #333 !important; 
+        border-radius: 6px;
     }
+    .stTextArea textarea:focus, .stTextInput input:focus { 
+        border: 1px solid #FF4500 !important; 
+        box-shadow: 0 0 15px rgba(255, 69, 0, 0.2); 
+    }
+    
+    /* --- Buttons --- */
+    .stButton button { width: 100%; border-radius: 6px; font-weight: bold; transition: all 0.3s ease; }
+    
+    div[data-testid="column"]:nth-of-type(1) div.stButton > button { 
+        background: linear-gradient(90deg, #8B0000, #FF4500); 
+        color: #FFF; border: none; box-shadow: 0 4px 15px rgba(255, 69, 0, 0.3);
+    }
+    div[data-testid="column"]:nth-of-type(1) div.stButton > button:hover { 
+        box-shadow: 0 6px 25px rgba(255, 69, 0, 0.6); transform: translateY(-2px);
+    }
+
+    div[data-testid="column"]:nth-of-type(2) div.stButton > button { 
+        background-color: transparent; color: #666; border: 1px solid #333; 
+    }
+    div[data-testid="column"]:nth-of-type(2) div.stButton > button:hover { 
+        border-color: #FF4500; color: #FF4500; background-color: #1a0505;
+    }
+
+    /* --- Report Elements --- */
     .execute-btn {
         background: linear-gradient(90deg, #FF4500, #FFD700); 
         border: none; color: #000; width: 100%; padding: 15px;
         font-weight: 900; font-size: 16px; cursor: pointer; border-radius: 6px;
+        text-transform: uppercase; letter-spacing: 2px;
         box-shadow: 0 5px 15px rgba(255, 69, 0, 0.3); margin-top: 20px;
     }
+    .execute-btn:hover { transform: scale(1.02); box-shadow: 0 8px 25px rgba(255, 69, 0, 0.5); }
+
     .ticker-box {
         background-color: #080808; border: 1px solid #222; border-left: 4px solid #FF4500;
         color: #FF4500; font-family: 'Courier New', monospace; padding: 15px; margin: 15px 0;
@@ -50,28 +91,34 @@ st.markdown("""
 
 # ================= 🔐 3. KEY MANAGEMENT =================
 active_key = None
-adjacent_key = None
 
-# ================= 📡 4. DATA ENGINE (V24: HYBRID + CACHE) =================
+# ================= 📡 4. DATA ENGINE (DUAL-TRACK V17.0) =================
 
-# 🔥 绝招：内置热门市场 ID 映射 (Fail-safe)
-# 如果 API 搜不到，代码会查这个字典。这保证演示时 SpaceX 一定能出结果。
-KNOWN_MARKETS = {
-    "spacex": "spacex-ipo-2024",
-    "starlink": "starlink-ipo-2024",
-    "trump": "trump-president-2024",
-    "btc": "bitcoin-price-2024",
-    "fed": "fed-rates-2024",
-    "gpt": "chatgpt-5-release"
-}
+def detect_language_type(text):
+    for char in text:
+        if '\u4e00' <= char <= '\u9fff': return "CHINESE"
+    return "ENGLISH"
 
-def normalize_polymarket_data(m):
+def normalize_market_object(m, source_type="market"):
+    """
+    统一清洗逻辑：把来自 Event 和 Market 两个不同接口的数据统一格式
+    """
     try:
+        # 排除已关闭的市场 (V17: 本地过滤，而非 API 过滤)
         if m.get('closed') is True: return None
-        title = m.get('question', m.get('title', 'Unknown'))
-        slug = m.get('slug', '')
         
-        # Odds parsing
+        # 提取标题
+        if source_type == "event":
+            # Event 接口通常包含 markets 列表，我们只取第一个或遍历
+            # 这里假设 m 已经是 Event 里的一个具体 market
+            title = m.get('question', m.get('title', 'Unknown'))
+        else:
+            title = m.get('question', m.get('title', 'Unknown'))
+
+        slug = m.get('slug', '')
+        m_id = m.get('id', '')
+        
+        # 解析赔率
         odds_display = "N/A"
         raw_outcomes = m.get('outcomes', '["Yes", "No"]')
         outcomes = json.loads(raw_outcomes) if isinstance(raw_outcomes, str) else raw_outcomes
@@ -87,239 +134,280 @@ def normalize_polymarket_data(m):
                 except: continue
             odds_display = " | ".join(odds_list)
         
+        # 必须有流动性或成交量
         volume = float(m.get('volume', 0))
+        liquidity = float(m.get('liquidity', 0))
+        
+        # V17: 放宽过滤条件，有些新市场 volume 低但 liquidity 高
+        if volume < 10 and liquidity < 10: return None 
         
         return {
-            "title": title,
-            "odds": odds_display,
-            "volume": volume,
-            "id": m.get('id'),
-            "slug": slug
+            "title": title, 
+            "odds": odds_display, 
+            "slug": slug, 
+            "volume": volume, 
+            "liquidity": liquidity,
+            "id": m_id
         }
     except: return None
 
-def fetch_from_gamma(endpoint, params):
-    """通用请求函数，带伪装 Header"""
-    url = f"https://gamma-api.polymarket.com/{endpoint}"
-    # 伪装成浏览器，防止被拦截
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+@st.cache_data(ttl=300) 
+def fetch_sidebar_markets():
     try:
-        resp = requests.get(url, params=params, headers=headers, timeout=5)
-        if resp.status_code == 200:
-            return resp.json()
-    except: pass
-    return []
-
-def search_via_adjacent_v2(query, api_key):
-    """Adjacent API 搜索"""
-    if not api_key: return []
-    url = "https://api.data.adj.news/api/search/query"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    params = {"q": query, "limit": 10}
-    try:
-        resp = requests.get(url, headers=headers, params=params, timeout=5)
-        if resp.status_code == 200:
-            data = resp.json()
-            items = data.get('data', data) if isinstance(data, dict) else data
-            results = []
-            for item in items:
-                slug = item.get("market_slug", item.get("slug"))
-                if slug:
-                    # 回查详情
-                    raw_mkts = fetch_from_gamma("markets", {"slug": slug})
-                    for m in raw_mkts:
-                        parsed = normalize_polymarket_data(m)
-                        if parsed: results.append(parsed)
-            return results
-    except: pass
-    return []
-
-def search_via_native_enhanced(meta):
-    """
-    V24 原生增强搜索：
-    1. 查 Events 接口 (命中率更高)
-    2. 查 Markets 接口
-    3. 查硬编码字典 (最后防线)
-    """
-    entity = meta.get("entity", "").lower()
-    intent = meta.get("intent", "").lower()
-    candidates = []
-    seen_ids = set()
-
-    # 1. 检查硬编码字典 (Fail-safe)
-    for k, v in KNOWN_MARKETS.items():
-        if k in entity:
-            # 如果匹配到热门词，直接去抓这个特定的 Slug
-            raw = fetch_from_gamma("markets", {"slug": v}) # 这里用 slug 精准抓
-            if not raw:
-                 # 可能是 event slug
-                 raw_ev = fetch_from_gamma("events", {"slug": v})
-                 if raw_ev: raw = raw_ev[0].get('markets', [])
-            
+        url = "https://gamma-api.polymarket.com/markets?limit=20&closed=false&sort=volume"
+        response = requests.get(url, headers={"User-Agent": "BeHolmes/1.0"}, timeout=5)
+        if response.status_code == 200:
+            raw = response.json()
+            cleaned = []
             for m in raw:
-                parsed = normalize_polymarket_data(m)
-                if parsed and parsed['id'] not in seen_ids:
-                    parsed['title'] = "🔥 [HOT] " + parsed['title'] # 标记一下
-                    candidates.append(parsed)
-                    seen_ids.add(parsed['id'])
+                parsed = normalize_market_object(m, "market")
+                if parsed: cleaned.append(parsed)
+            return cleaned
+        return []
+    except: return []
 
-    # 2. 搜索 Events (比 Markets 更准)
-    events_data = fetch_from_gamma("events", {"q": entity, "limit": 20, "closed": "false"})
-    for ev in events_data:
-        for m in ev.get('markets', []):
-            parsed = normalize_polymarket_data(m)
-            if parsed and parsed['id'] not in seen_ids:
-                candidates.append(parsed)
-                seen_ids.add(parsed['id'])
+def dual_track_search(keywords):
+    """
+    🔥 V17 核心：双轨搜索
+    同时搜 /events 和 /markets 两个接口，确保无死角。
+    """
+    all_results = []
+    seen_ids = set()
     
-    # 3. 搜索 Markets (补充)
-    mkts_data = fetch_from_gamma("markets", {"q": entity, "limit": 50, "closed": "false", "sort": "volume"})
-    for m in mkts_data:
-        parsed = normalize_polymarket_data(m)
-        if parsed and parsed['id'] not in seen_ids:
-            candidates.append(parsed)
-            seen_ids.add(parsed['id'])
+    for kw in keywords:
+        if not kw: continue
+        
+        # --- Track 1: Search Events (Search Groups) ---
+        # 很多大热门像 SpaceX IPO 其实是一个 Event Group
+        try:
+            url_events = f"https://gamma-api.polymarket.com/events?q={kw}&limit=20"
+            resp_ev = requests.get(url_events, headers={"User-Agent": "BeHolmes/1.0"}, timeout=4)
+            if resp_ev.status_code == 200:
+                events = resp_ev.json()
+                for ev in events:
+                    # 提取 Event 里面的 markets
+                    markets_in_event = ev.get('markets', [])
+                    for m in markets_in_event:
+                        parsed = normalize_market_object(m, "event")
+                        if parsed and parsed['id'] not in seen_ids:
+                            all_results.append(parsed)
+                            seen_ids.add(parsed['id'])
+        except: pass
 
-    # 4. 本地筛选 Intent
-    if intent:
-        scored = []
-        for m in candidates:
-            score = 0
-            if intent in m['title'].lower(): score += 500
-            score += (m['volume'] / 10000)
-            m['_score'] = score
-            scored.append(m)
-        scored.sort(key=lambda x: x['_score'], reverse=True)
-        return scored[:10]
+        # --- Track 2: Search Markets (Direct Contracts) ---
+        # 搜具体的合约标题
+        try:
+            url_mkts = f"https://gamma-api.polymarket.com/markets?q={kw}&limit=50"
+            resp_mk = requests.get(url_mkts, headers={"User-Agent": "BeHolmes/1.0"}, timeout=4)
+            if resp_mk.status_code == 200:
+                markets = resp_mk.json()
+                for m in markets:
+                    parsed = normalize_market_object(m, "market")
+                    if parsed and parsed['id'] not in seen_ids:
+                        all_results.append(parsed)
+                        seen_ids.add(parsed['id'])
+        except: pass
+
+    # --- Phase 3: Reranking ---
+    # 根据相关性排序：如果标题里包含关键词，权重极高；其次看 Volume
+    ranked_results = []
+    search_str = " ".join(keywords).lower()
     
-    return candidates[:10]
+    for item in all_results:
+        score = 0
+        title_lower = item['title'].lower()
+        
+        # 包含关键词加分
+        if any(k.lower() in title_lower for k in keywords):
+            score += 100
+        
+        # Volume 加分 (归一化)
+        score += (item['volume'] / 10000) 
+        
+        item['_score'] = score
+        ranked_results.append(item)
+        
+    # 按分数降序
+    ranked_results.sort(key=lambda x: x['_score'], reverse=True)
+    
+    return ranked_results[:30] # 只取前30个最相关的
 
-def extract_search_intent_ai(user_text, key):
+def extract_search_terms_ai(user_text, key):
+    if not user_text: return []
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         prompt = f"""
-        Extract Entity (English) and Intent (English).
-        Input: "SpaceX即将上市" -> Output: Entity=SpaceX|Intent=IPO
-        Input: "川普胜率" -> Output: Entity=Trump|Intent=Win
-        Input: "{user_text}" -> Output:
+        Extract 2 distinct English search keywords for a database.
+        1. Specific Entity+Event (e.g. "SpaceX IPO")
+        2. Broad Entity (e.g. "SpaceX")
+        Input: "{user_text}"
+        Output: Keyword1, Keyword2 (comma separated)
         """
         response = model.generate_content(prompt)
-        parts = response.text.strip().split('|')
-        entity = parts[0].split('=')[1].strip() if len(parts) > 0 else user_text
-        intent = parts[1].split('=')[1].strip() if len(parts) > 1 else ""
-        return {"entity": entity, "intent": intent}
-    except: return {"entity": user_text, "intent": ""}
+        raw_text = response.text.strip()
+        keywords = [k.strip() for k in raw_text.split(',')]
+        return keywords[:2]
+    except: return []
 
 # ================= 🧠 5. INTELLIGENCE LAYER =================
-
-def detect_language_type(text):
-    for char in text:
-        if '\u4e00' <= char <= '\u9fff': return "CHINESE"
-    return "ENGLISH"
 
 def consult_holmes(user_evidence, market_list, key):
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
+        
         markets_text = "\n".join([f"- {m['title']} [Odds: {m['odds']}]" for m in market_list])
         target_language = detect_language_type(user_evidence)
-        prompt = f"""
-        Role: **Be Holmes**, Hedge Fund Strategist.
         
-        User Input: "{user_evidence}"
-        Market Data: 
+        prompt = f"""
+        Role: You are **Be Holmes**, a Senior Hedge Fund Strategist.
+        
+        [User Input]: "{user_evidence}"
+        [Market Data Scanned]: 
         {markets_text}
 
-        **INSTRUCTION:**
-        1. Language: **{target_language}**.
-        2. Find the exact market.
+        **MANDATORY INSTRUCTION:**
+        1. **Language:** Output strictly in **{target_language}**.
+        2. **Matching:** Find the market that matches the user's intent. 
+           - If user asks "SpaceX IPO", look for "SpaceX IPO". 
+           - DO NOT Hallucinate. If the specific market is missing from the list above, say "Target market not found" and analyze the closest proxy (like SpaceX general performance).
         
-        **OUTPUT FORMAT (Markdown):**
+        **OUTPUT FORMAT (Strict Markdown):**
+        
         ---
-        ### 🕵️‍♂️ Case File: [Market Title]
-        <div class="ticker-box">🔥 LIVE SNAPSHOT: [Insert Odds]</div>
-        **1. ⚖️ The Verdict**
-        - **Signal:** 🟢 BUY / 🔴 SELL
-        - **Confidence:** [0-100]%
-        **2. 🧠 Deep Logic**
-        > [Analysis]
-        **3. 🛡️ Execution**
-        - [Plan]
+        ### 🕵️‍♂️ Case File: [Exact Market Title]
+        
+        <div class="ticker-box">
+        🔥 LIVE SNAPSHOT: [Insert Odds]
+        </div>
+        
+        **1. ⚖️ The Verdict (交易指令)**
+        - **Signal:** 🟢 BUY / 🔴 SELL / ⚠️ WAIT
+        - **Confidence:** **[0-100]%**
+        - **Valuation:** Market: [X%], Model: [Y%].
+        
+        **2. 🧠 Deep Logic (深度推演)**
+        > *[Analysis in {target_language}. 200 words.]*
+        
+        **3. 🛡️ Execution Protocol (执行方案)**
+        - **Action:** [Instruction]
+        - **Timeframe:** [Duration]
+        - **Exit:** [Condition]
         ---
         """
         response = model.generate_content(prompt)
-        btn_html = """<br><a href='https://polymarket.com/' target='_blank' style='text-decoration:none;'><button class='execute-btn'>🚀 EXECUTE TRADE ON POLYMARKET</button></a>"""
+        
+        btn_html = """
+<br>
+<a href='https://polymarket.com/' target='_blank' style='text-decoration:none;'>
+<button class='execute-btn'>🚀 EXECUTE TRADE ON POLYMARKET</button>
+</a>
+"""
         return response.text + btn_html
-    except Exception as e: return f"❌ Error: {str(e)}"
+    except Exception as e: return f"❌ Intelligence Error: {str(e)}"
+
+# ================= 📘 6. MANUAL MODULE =================
+
+@st.dialog("📘 Be Holmes Manual", width="large")
+def open_manual():
+    lang = st.radio("Language / 语言", ["English", "中文"], horizontal=True)
+    st.markdown("---")
+    if lang == "中文":
+        st.markdown("""
+        ### 🕵️‍♂️ 系统简介
+        **Be Holmes** 是基于 Gemini 2.5 的全知全能金融侦探。
+        
+        ### 🚀 V17.0 核心引擎：双轨深潜 (Dual-Track)
+        我们同时接入 Polymarket 的 `/events` (事件组) 和 `/markets` (独立合约) 接口。无论目标市场是被打包在事件集中，还是作为独立合约存在，双轨引擎都能将其召回。
+        
+        ### 🛠️ 操作指南
+        - **输入:** 粘贴新闻或关键词。
+        - **调查:** 点击红色 **INVESTIGATE**。
+        """)
+    else:
+        st.markdown("""
+        ### 🕵️‍♂️ System Profile
+        **Be Holmes** is an omniscient financial detective.
+        
+        ### 🚀 V17.0 Engine: Dual-Track Search
+        We now query both `/events` and `/markets` endpoints simultaneously to ensure zero-blind-spot retrieval of both grouped and standalone contracts.
+        """)
 
 # ================= 🖥️ 7. MAIN INTERFACE =================
 
 with st.sidebar:
     st.markdown("## 💼 DETECTIVE'S TOOLKIT")
-    
-    with st.expander("🔑 API Keys", expanded=True):
-        st.info("💡 Adjacent Key unlocks 'God Mode'. Empty uses Native Mode.")
-        user_api_key = st.text_input("Gemini Key (Required)", type="password")
-        adjacent_key_input = st.text_input("Adjacent News Key (Optional)", type="password")
+    with st.expander("🔑 API Key Settings", expanded=False):
+        st.caption("Rate limited? Enter your own Google AI Key.")
+        user_api_key = st.text_input("Gemini Key", type="password")
+        st.markdown("[Get Free Key](https://aistudio.google.com/app/apikey)")
 
     if user_api_key:
         active_key = user_api_key
-        st.success("🔓 Gemini: Active")
+        st.success("🔓 User Key Active")
     elif "GEMINI_KEY" in st.secrets:
         active_key = st.secrets["GEMINI_KEY"]
-        st.info("🔒 Gemini: System Key")
+        st.info("🔒 System Key Active")
     else:
-        st.error("⚠️ Gemini Key Missing!")
+        st.error("⚠️ No API Key found!")
         st.stop()
-        
-    if adjacent_key_input:
-        adjacent_key = adjacent_key_input
-        st.success("🔓 Adjacent: SEMANTIC MODE")
-    else:
-        st.caption("🔒 Adjacent: Not set (Using Native Enhanced)")
+
+    st.markdown("---")
+    st.markdown("### 🌊 Market Sonar (Top 5)")
+    with st.spinner("Initializing Sonar..."):
+        top_markets = fetch_sidebar_markets()
+    if top_markets:
+        for m in top_markets[:5]:
+            st.caption(f"📅 {m['title']}")
+            st.code(f"{m['odds']}") 
+    else: st.error("⚠️ Data Stream Offline")
 
 # --- Main Stage ---
 st.title("Be Holmes")
 st.caption("EVENT-DRIVEN INTELLIGENCE | SECOND-ORDER CAUSAL REASONING") 
 st.markdown("---")
 
-user_news = st.text_area("Input Evidence...", height=150, label_visibility="collapsed", placeholder="输入新闻... (e.g. SpaceX IPO)")
+st.markdown("### 📁 EVIDENCE INPUT")
+user_news = st.text_area(
+    "Input News / Rumors / X Links...", 
+    height=150, 
+    placeholder="Paste detailed intel here... (e.g., 'Rumors that iPhone 18 will remove all buttons')", 
+    label_visibility="collapsed"
+)
 
 col_btn_main, col_btn_help = st.columns([4, 1])
 with col_btn_main:
     ignite_btn = st.button("🔍 INVESTIGATE", use_container_width=True)
+with col_btn_help:
+    help_btn = st.button("📘 Manual", use_container_width=True)
+
+if help_btn: open_manual()
 
 if ignite_btn:
     if not user_news:
-        st.warning("⚠️ Evidence required.")
+        st.warning("⚠️ Evidence required to initiate investigation.")
     else:
-        with st.status("🚀 Initiating Search Protocol...", expanded=True) as status:
-            st.write("🧠 Analyzing intent...")
-            search_meta = extract_search_intent_ai(user_news, active_key)
-            entity = search_meta.get('entity')
-            intent = search_meta.get('intent')
+        with st.status("🚀 Initiating Dual-Track Search...", expanded=True) as status:
+            st.write("🧠 Extracting intent (Gemini 2.5)...")
+            search_keywords = extract_search_terms_ai(user_news, active_key)
             
             sonar_markets = []
+            if search_keywords:
+                st.write(f"🌊 Scanning Events & Markets for: {search_keywords}...")
+                # V17 双轨搜索
+                sonar_markets = dual_track_search(search_keywords)
+                st.write(f"✅ Dual-Track Result: Found {len(sonar_markets)} relevant markets.")
             
-            # 1. Adjacent Mode
-            if adjacent_key:
-                st.write(f"🌊 Adjacent Search: '{user_news}'...")
-                sonar_markets = search_via_adjacent_v2(user_news, adjacent_key)
-                if sonar_markets: st.write(f"✅ Adjacent: Locked {len(sonar_markets)} targets.")
-            
-            # 2. Native Enhanced Mode (Fallback)
+            # 如果真的没搜到，再用 Top 市场兜底
             if not sonar_markets:
-                st.write(f"🌊 Native Search: Entity='{entity}' (checking Events & Markets)...")
-                sonar_markets = search_via_native_enhanced(search_meta)
-                st.write(f"✅ Match Found: {len(sonar_markets)} markets.")
+                st.write("⚠️ Deep scan empty. Falling back to global top markets.")
+                sonar_markets = top_markets
             
             st.write("⚖️ Calculating Alpha...")
             status.update(label="✅ Investigation Complete", state="complete", expanded=False)
 
-        if not sonar_markets: st.error("⚠️ No relevant markets found.")
+        if not sonar_markets: st.error("⚠️ No relevant markets found in the database.")
         else:
             with st.spinner(">> Deducing Alpha..."):
                 result = consult_holmes(user_news, sonar_markets, active_key)
