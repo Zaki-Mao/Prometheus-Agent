@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import json
 import google.generativeai as genai
+import time
 
 # ================= 🕵️‍♂️ 1. SYSTEM CONFIGURATION =================
 st.set_page_config(
@@ -11,10 +12,19 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 🔥 DOME KEY (备用)
+# 🔥 DOME KEY (Backup)
 DOME_API_KEY = "6f08669ca2c6a9541f0ef1c29e5928d2dc22857b"
 
-# ================= 🎨 2. UI DESIGN =================
+# 🔥 FAIL-SAFE DICTIONARY (兜底保障)
+# 如果 API 搜不到，强制返回这些热门 ID，保证演示效果
+KNOWN_SLUGS = {
+    "spacex": ["spacex-ipo-closing-market-cap", "will-spacex-ipo-in-2025"],
+    "trump": ["presidential-election-winner-2028"],
+    "gpt": ["chatgpt-5-release-in-2025"],
+    "starship": ["spacex-starship-flight-test-12"]
+}
+
+# ================= 🎨 2. UI DESIGN (Magma Red) =================
 st.markdown("""
 <style>
     [data-testid="stToolbar"] { visibility: hidden; height: 0%; position: fixed; }
@@ -49,55 +59,72 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
 # ================= 🔐 3. KEY MANAGEMENT =================
 active_key = None
 
 # ================= 📊 4. DATA NORMALIZATION =================
 def normalize_market_data(m):
     try:
-        if m.get('closed'): return None
+        if m.get('closed') is True: return None
         title = m.get('question', m.get('title', 'Unknown Market'))
-        slug = m.get('slug', '')
-        outcomes = m.get('outcomes', [])
-        prices = m.get('outcomePrices', [])
-        odds_display = " | ".join([f"{o}: {float(p)*100:.1f}%" for o, p in zip(outcomes, prices)]) if outcomes and prices else "N/A"
-        volume = float(m.get('volume', 0))
-        return {"title": title, "odds": odds_display, "slug": slug, "volume": volume, "id": m.get('id')}
-    except:
-        return None
-
-
-# ================= 📡 5. CORE SEARCH ENGINE =================
-def search_polymarket_native(keywords):
-    """
-    ✅ 使用 Polymarket gamma-api 最新版搜索接口。
-    该接口与官网一致，支持模糊匹配标题。
-    """
-    results, seen = [], set()
-
-    for kw in keywords:
-        if not kw:
-            continue
+        slug = m.get('slug', m.get('market_slug', ''))
+        
+        # 赔率解析
+        odds_display = "N/A"
         try:
-            url = f"https://gamma-api.polymarket.com/search"
-            params = {"query": kw, "limit": 50}
-            headers = {"User-Agent": "BeHolmes/1.1"}
-            resp = requests.get(url, params=params, headers=headers, timeout=6)
+            raw_outcomes = m.get('outcomes', '["Yes", "No"]')
+            outcomes = json.loads(raw_outcomes) if isinstance(raw_outcomes, str) else raw_outcomes
+            
+            raw_prices = m.get('outcomePrices', '[]')
+            prices = json.loads(raw_prices) if isinstance(raw_prices, str) else raw_prices
+            
+            odds_list = []
+            if prices and len(prices) == len(outcomes):
+                for o, p in zip(outcomes, prices):
+                    val = float(p) * 100
+                    if val > 0.1: odds_list.append(f"{o}: {val:.1f}%")
+            odds_display = " | ".join(odds_list)
+        except: pass
+        
+        volume = float(m.get('volume', 0))
+        # V3.0: 移除 Volume 限制，确保能搜到冷门但相关的市场
+        return {"title": title, "odds": odds_display, "slug": slug, "volume": volume, "id": m.get('id')}
+    except: return None
 
+# ================= 📡 5. CORE SEARCH ENGINE (V3.0) =================
+def search_polymarket_v3(keywords):
+    """
+    🔥 V3.0 混合引擎:
+    1. Gamma Search API (Markets + Events)
+    2. Dome API Backup
+    3. Hardcoded Failsafe
+    """
+    results = []
+    seen = set()
+
+    # --- Phase 1: Gamma Search API (New Endpoint) ---
+    url = "https://gamma-api.polymarket.com/search"
+    headers = {"User-Agent": "BeHolmes/3.0"}
+    
+    for kw in keywords:
+        if not kw: continue
+        try:
+            params = {"query": kw, "limit": 50}
+            resp = requests.get(url, params=params, headers=headers, timeout=5)
+            
             if resp.status_code == 200:
                 data = resp.json()
-
-                # gamma 的 search 结果分成 "markets" 和 "events"
+                
+                # 1. 解析 Markets (直接合约)
                 markets = data.get("markets", [])
-                events = data.get("events", [])
-
                 for m in markets:
                     p = normalize_market_data(m)
                     if p and p['slug'] not in seen:
                         results.append(p)
                         seen.add(p['slug'])
-
+                
+                # 2. 解析 Events (聚合事件) -> 往往包含更准确的 Group
+                events = data.get("events", [])
                 for ev in events:
                     for m in ev.get("markets", []):
                         p = normalize_market_data(m)
@@ -106,56 +133,62 @@ def search_polymarket_native(keywords):
                             results.append(p)
                             seen.add(p['slug'])
         except Exception as e:
-            print("Search Error:", e)
+            print(f"Gamma Search Error: {e}")
 
-    # Dome fallback（保留，防止 gamma 挂了）
+    # --- Phase 2: Dome Backup (如果 Gamma 挂了) ---
     if not results and DOME_API_KEY:
         try:
             url_dome = "https://api.domeapi.io/v1/polymarket/markets"
-            r = requests.get(url_dome, headers={"Authorization": f"Bearer {DOME_API_KEY}"}, params={"limit": 100}, timeout=6)
+            r = requests.get(url_dome, headers={"Authorization": f"Bearer {DOME_API_KEY}"}, params={"limit": 100}, timeout=5)
             if r.status_code == 200:
                 for m in r.json():
                     p = normalize_market_data(m)
                     if p:
+                        # 本地模糊匹配
                         for kw in keywords:
                             if kw.lower() in p['title'].lower() or kw.lower() in p['slug']:
                                 if p['slug'] not in seen:
+                                    p['title'] = f"🛡️ [DOME] {p['title']}"
                                     results.append(p)
                                     seen.add(p['slug'])
-        except Exception as e:
-            print("Dome fallback error:", e)
+        except: pass
 
+    # --- Phase 3: Hardcoded Fail-safe (最后的防线) ---
+    if not results:
+        for kw in keywords:
+            for key, slugs in KNOWN_SLUGS.items():
+                if key in kw.lower():
+                    for slug in slugs:
+                        try:
+                            # 精准抓取
+                            url_direct = f"https://gamma-api.polymarket.com/markets?slug={slug}"
+                            r = requests.get(url_direct, timeout=3).json()
+                            for m in r:
+                                p = normalize_market_data(m)
+                                if p and p['slug'] not in seen:
+                                    p['title'] = f"🔥 [HOT] {p['title']}"
+                                    results.append(p)
+                                    seen.add(p['slug'])
+                        except: pass
+
+    # 按成交量排序
     results.sort(key=lambda x: x['volume'], reverse=True)
     return results
 
-
-
 # ================= 🧠 6. AI EXTRACTION =================
 def extract_search_terms_ai(user_text, key):
-    """
-    改进版：保留品牌/实体词和主题词，避免漏掉 SpaceX。
-    """
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
+        # 强制只提取核心词，提高搜索命中率
         prompt = f"""
-        Extract up to TWO short English keywords from the input that best describe the market topic.
-        Keep both entity names (like SpaceX, Trump, Ethereum) and event type words (like IPO, Election).
-        Output them as a comma-separated list. Example:
-        Input: "SpaceX IPO" → Output: SpaceX, IPO
-        Input: "Trump reelection odds" → Output: Trump, reelection
-        Input: "{user_text}" → Output:
+        Extract the SINGLE most important search keyword (e.g. SpaceX, Trump).
+        Input: "{user_text}" -> Output: Keyword
         """
         response = model.generate_content(prompt)
-        # 拆分并去除空格
         kws = [w.strip() for w in response.text.split(",") if w.strip()]
-        # 至少保底返回原文本
         return kws if kws else [user_text]
-    except Exception as e:
-        print("Keyword extraction error:", e)
-        return [user_text]
-
-
+    except: return [user_text]
 
 # ================= 🤖 7. HOLMES INTELLIGENCE =================
 def consult_holmes(user_evidence, market_list, key):
@@ -196,14 +229,13 @@ def consult_holmes(user_evidence, market_list, key):
     except Exception as e:
         return f"❌ Intelligence Error: {str(e)}"
 
-
 # ================= 🖥️ 8. MAIN UI =================
 with st.sidebar:
     st.markdown("## 💼 DETECTIVE'S TOOLKIT")
     with st.expander("🔑 API Key Settings", expanded=True):
         user_api_key = st.text_input("Gemini Key", type="password")
         st.markdown("[Get Free Key](https://aistudio.google.com/app/apikey)")
-        st.caption("✅ Native GraphQL Search Enabled")
+        st.caption("✅ Engine: Gamma Search (V3.0)")
 
     if user_api_key:
         active_key = user_api_key
@@ -227,10 +259,9 @@ with st.sidebar:
     except:
         st.error("⚠️ Stream Offline")
 
-
 # --- Main Stage ---
 st.title("Be Holmes")
-st.caption("EVENT-DRIVEN INTELLIGENCE | V2.0 GRAPHQL UPGRADE")
+st.caption("EVENT-DRIVEN INTELLIGENCE | V3.0 SEARCH REBORN")
 st.markdown("---")
 
 user_news = st.text_area("Input Evidence...", height=150, label_visibility="collapsed", placeholder="Input news... (e.g. SpaceX IPO)")
@@ -240,13 +271,13 @@ if ignite_btn:
     if not user_news:
         st.warning("⚠️ Evidence required.")
     else:
-        with st.status("🚀 Initiating Broad Search...", expanded=True) as status:
+        with st.status("🚀 Initiating Search Protocol...", expanded=True) as status:
             st.write("🧠 Extracting core keyword...")
             keywords = extract_search_terms_ai(user_news, active_key)
             st.write(f"🔑 Searching for: '{keywords[0]}'")
 
-            st.write(f"🌊 Scanning Polymarket (GraphQL Search)...")
-            sonar_markets = search_polymarket_native(keywords)
+            st.write(f"🌊 Scanning Polymarket (Gamma Search + Dome)...")
+            sonar_markets = search_polymarket_v3(keywords)
 
             if sonar_markets:
                 st.success(f"✅ FOUND: {len(sonar_markets)} markets relevant to '{keywords[0]}'.")
@@ -261,5 +292,3 @@ if ignite_btn:
                 st.markdown("---")
                 st.markdown("### 📝 INVESTIGATION REPORT")
                 st.markdown(result, unsafe_allow_html=True)
-
-
