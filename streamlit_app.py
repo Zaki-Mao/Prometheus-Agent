@@ -684,6 +684,7 @@ news_list = fetch_ticker_news()
 ticker_text = " &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; /// &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ".join(news_list)
 
 # 注入 CSS 和 HTML (保持原样，无需修改样式)
+# 注入 CSS 和 HTML
 st.markdown(f"""
 <style>
     .news-ticker-container {{
@@ -703,16 +704,24 @@ st.markdown(f"""
         box-shadow: 0 -4px 15px rgba(0,0,0,0.5);
     }}
     .ticker-wrap {{ width: 100%; overflow: hidden; }}
+    
     .ticker-move {{
         display: inline-block;
         white-space: nowrap;
-        animation: ticker 60s linear infinite; /* 调整为60s，让新闻多的时候滚慢点 */
+        /* 🔴 这里修改速度：原来的 90s 改成 200s 或 300s */
+        /* 数值越大，滚得越慢 */
+        animation: ticker 200s linear infinite; 
     }}
+    
+    /* 鼠标悬停暂停 */
+    .ticker-wrap:hover .ticker-move {{
+        animation-play-state: paused;
+    }}
+    
     @keyframes ticker {{
         0% {{ transform: translate3d(100%, 0, 0); }}
         100% {{ transform: translate3d(-100%, 0, 0); }}
     }}
-    .ticker-wrap:hover .ticker-move {{ animation-play-state: paused; }}
 </style>
 
 <div class="news-ticker-container">
