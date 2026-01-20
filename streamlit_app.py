@@ -5,6 +5,7 @@ import google.generativeai as genai
 import re
 
 # ================= 🔐 0. SAFE KEY MANAGEMENT =================
+# 自动从 Streamlit Secrets 读取 Key，防止 GitHub 泄露
 try:
     EXA_API_KEY = st.secrets["EXA_API_KEY"]
     GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
@@ -14,10 +15,12 @@ except FileNotFoundError:
     GOOGLE_API_KEY = None
     KEYS_LOADED = False
 except KeyError:
+    # 处理 secrets 存在但 key 缺失的情况
     EXA_API_KEY = st.secrets.get("EXA_API_KEY", None)
     GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", None)
     KEYS_LOADED = bool(EXA_API_KEY and GOOGLE_API_KEY)
 
+# 配置 Gemini
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
 
@@ -33,86 +36,133 @@ st.set_page_config(
     page_title="Be Holmes | Alpha Terminal",
     page_icon="🕵️‍♂️",
     layout="wide",
-    initial_sidebar_state="expanded" 
+    initial_sidebar_state="expanded"
 )
 
-# ================= 🎨 2. UI THEME (MOBILE PRO) =================
+# ================= 🎨 2. RED UI THEME (CSS OVERHAUL) =================
 st.markdown("""
 <style>
+    /* 1. 全局字体与背景 */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap');
     
-    .stApp { background-color: #050505; font-family: 'Inter', sans-serif; }
+    .stApp { 
+        background-color: #050505; 
+        font-family: 'Inter', sans-serif;
+    }
     
-    /* 🔥 关键修复：保留左上角侧边栏开关，只隐藏右上角菜单 */
+    /* 🔥 关键修复：手机端适配 */
+    /* 不要完全隐藏 header，否则手机端无法打开侧边栏！ */
+    /* header { visibility: hidden; }  <-- DELETE THIS */
+    
+    /* 只隐藏右上角的菜单和装饰条 */
     [data-testid="stToolbar"] { visibility: hidden; height: 0%; position: fixed; }
     [data-testid="stDecoration"] { visibility: hidden; }
-    header[data-testid="stHeader"] { background-color: rgba(0,0,0,0); } /* 顶部透明 */
+    header[data-testid="stHeader"] { background-color: rgba(0,0,0,0); } /* 透明背景 */
+    
     footer { visibility: hidden; }
     
-    /* 侧边栏 */
-    [data-testid="stSidebar"] { background-color: #000000; border-right: 1px solid #222; }
+    /* 2. 侧边栏深度定制 */
+    [data-testid="stSidebar"] { 
+        background-color: #000000; 
+        border-right: 1px solid #222; 
+    }
     
-    /* 标题 */
+    /* 3. 标题体系 */
     h1 { 
         background: linear-gradient(90deg, #FF4B4B, #FF9F9F); 
         -webkit-background-clip: text; -webkit-text-fill-color: transparent;
         font-family: 'Inter', sans-serif; font-weight: 900; letter-spacing: -1px;
-        border-bottom: 1px solid #222; padding-bottom: 20px;
+        border-bottom: 2px solid #222; padding-bottom: 20px;
         font-size: 3.5rem;
     }
+    h3 { color: #FF4B4B !important; font-weight: 700; }
     
-    /* 状态栏的小字 */
-    .status-bar { color: #666; font-size: 0.8rem; font-family: 'JetBrains Mono', monospace; margin-top:-10px; margin-bottom: 20px;}
-    
-    /* 输入框 */
+    /* 4. 输入框美化 */
     .stTextArea textarea { 
-        background-color: #0F0F0F !important; color: #E0E0E0 !important; 
-        border: 1px solid #333 !important; border-radius: 8px;
+        background-color: #0F0F0F !important; 
+        color: #E0E0E0 !important; 
+        border: 1px solid #333 !important; 
+        border-radius: 8px;
+        font-family: 'Inter', sans-serif;
     }
-    .stTextArea textarea:focus { border-color: #FF4B4B !important; }
+    .stTextArea textarea:focus { border-color: #FF4B4B !important; box-shadow: 0 0 10px rgba(255, 75, 75, 0.2); }
     
-    /* 主按钮 */
+    /* 5. 核心按钮 (Red Neon) */
     .stButton button {
         background: linear-gradient(90deg, #D90429, #EF233C) !important;
-        color: white !important; border: none !important;
-        font-weight: 800 !important; padding: 0.8rem 1rem !important;
-        border-radius: 6px !important; text-transform: uppercase; letter-spacing: 1px;
+        color: white !important; 
+        border: none !important;
+        font-weight: 800 !important; 
+        padding: 0.6rem 1rem !important;
+        border-radius: 6px !important; 
+        text-transform: uppercase; 
+        letter-spacing: 1px;
         transition: all 0.3s ease;
     }
+    .stButton button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 15px rgba(217, 4, 41, 0.4);
+        color: white !important;
+    }
+
+    /* 6. 市场卡片 (Market Card) */
+    .market-card {
+        background: #0A0A0A;
+        border: 1px solid #222;
+        border-left: 4px solid #D90429;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+        transition: all 0.3s ease;
+    }
+    .market-card:hover {
+        border-color: #EF233C;
+        background: #111;
+        box-shadow: 0 5px 20px rgba(0,0,0,0.5);
+    }
+    .card-title { font-size: 1.2rem; font-weight: 700; color: #FFF; margin-bottom: 10px; }
+    .card-stat { font-family: 'JetBrains Mono', monospace; color: #FF4B4B; font-size: 1.4rem; font-weight: 700; }
+    .card-sub { color: #666; font-size: 0.85rem; }
+
+    /* 7. 报告盒子 (Report Box) */
+    .report-box {
+        background-color: #0E0E0E; 
+        border: 1px solid #222; 
+        padding: 30px;
+        border-radius: 12px; 
+        margin-top: 20px;
+        color: #CCC;
+        line-height: 1.6;
+    }
     
-    /* 侧边栏 Ticker */
-    .ticker-item { padding: 12px 0; border-bottom: 1px solid #1A1A1A; font-size: 0.85rem; }
+    /* 8. 侧边栏 Ticker 样式 */
+    .ticker-item {
+        padding: 12px 0;
+        border-bottom: 1px solid #1A1A1A;
+        font-size: 0.85rem;
+    }
     .ticker-title { color: #CCC; margin-bottom: 4px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500;}
     .ticker-price { font-family: 'JetBrains Mono', monospace; color: #FF4B4B; font-weight: bold; font-size: 1rem;}
-
-    /* 市场卡片 */
-    .market-card {
-        background: #0A0A0A; border: 1px solid #222; border-left: 4px solid #D90429;
-        border-radius: 8px; padding: 20px; margin-bottom: 20px;
-    }
-    .card-title { font-size: 1.2rem; font-weight: 700; color: #FFF; margin-bottom: 15px; }
-    .card-stat { font-family: 'JetBrains Mono', monospace; color: #FF4B4B; font-size: 1.4rem; font-weight: 700; }
+    .ticker-vol { color: #555; float: right; font-size: 0.75rem; margin-top: 2px;}
     
-    /* 报告盒子 */
-    .report-box {
-        background-color: #0E0E0E; border: 1px solid #222; padding: 25px;
-        border-radius: 12px; margin-top: 20px; color: #CCC; line-height: 1.6;
-    }
-    
-    /* 底部 Expander (Manual) 样式 */
+    /* 9. 底部 Manual Expander 样式 */
     .streamlit-expanderHeader {
-        background-color: #0A0A0A !important; color: #888 !important; border: 1px solid #222 !important;
-        border-radius: 6px !important; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem !important;
+        background-color: #0A0A0A !important;
+        color: #888 !important;
+        border: 1px solid #222 !important;
+        border-radius: 6px !important;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.85rem !important;
     }
-    
-    /* 📱 手机端适配核心代码 */
+
+    /* 📱 10. 手机端响应式适配 (Mobile Tweaks) */
     @media only screen and (max-width: 768px) {
-        h1 { font-size: 2.2rem !important; padding-bottom: 15px !important; }
+        h1 { font-size: 2.2rem !important; padding-bottom: 10px !important; }
         .stButton button { width: 100% !important; margin-top: 10px !important; padding: 12px !important; }
         .market-card { padding: 15px !important; }
-        .report-box { font-size: 0.9rem !important; padding: 15px !important; }
-        /* 强制侧边栏在手机上行为正常 */
-        section[data-testid="stSidebar"] { width: 80% !important; } 
+        .report-box { padding: 15px !important; font-size: 0.95rem !important; }
+        /* 确保侧边栏在手机上可以正常滑出 */
+        section[data-testid="stSidebar"] { width: 85% !important; }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -125,6 +175,7 @@ def detect_language(text):
     return "ENGLISH"
 
 def generate_english_keywords(user_text):
+    """Bilingual Bridge: Translate Chinese intent to English keywords"""
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         prompt = f"""Task: Extract English search keywords for Polymarket. Input: "{user_text}". Output: Keywords only."""
@@ -151,11 +202,13 @@ def search_with_exa(query):
                     if market_data:
                         markets_found.extend(market_data)
                         seen_ids.add(slug)
-    except Exception as e: print(f"Search error: {e}")
+    except Exception as e:
+        print(f"Search error: {e}")
     return markets_found, search_query
 
 def fetch_poly_details(slug):
     valid_markets = []
+    # Try Event
     try:
         url = f"https://gamma-api.polymarket.com/events?slug={slug}"
         resp = requests.get(url, timeout=3).json()
@@ -165,6 +218,7 @@ def fetch_poly_details(slug):
                 if p: valid_markets.append(p)
             return valid_markets
     except: pass
+    # Try Market
     try:
         url = f"https://gamma-api.polymarket.com/markets?slug={slug}"
         resp = requests.get(url, timeout=3).json()
@@ -195,6 +249,8 @@ def normalize_data(m):
         }
     except: return None
 
+# ================= 🌟 4. GENIUS ANALYST PROMPT =================
+
 def consult_holmes(user_input, market_data):
     if not GOOGLE_API_KEY: return "AI Key Missing."
     try:
@@ -203,10 +259,10 @@ def consult_holmes(user_input, market_data):
         
         if lang == "CHINESE":
             lang_instruction = "IMPORTANT: Respond in **CHINESE (中文)**."
-            role_desc = "你现在是 **Be Holmes**，一位极度理性、只相信数据和博弈论的顶级宏观对冲基金经理。"
+            role_desc = "你现在是 **Be Holmes**，一位拥有 20 年经验的华尔街顶级宏观对冲基金经理，也是预测市场套利天才。你的性格极度理性，甚至有点愤世嫉俗，你只相信利益和概率，不相信政客的嘴炮。"
         else:
             lang_instruction = "IMPORTANT: Respond in **ENGLISH**."
-            role_desc = "You are **Be Holmes**, a legendary Wall Street Macro Hedge Fund Manager. Rational, cynical, and data-driven."
+            role_desc = "You are **Be Holmes**, a legendary Wall Street Macro Hedge Fund Manager and Prediction Market Genius. You are hyper-rational and cynical."
 
         market_context = ""
         if market_data:
@@ -217,22 +273,25 @@ def consult_holmes(user_input, market_data):
 
         prompt = f"""
         {role_desc}
+        
         [Intel]: "{user_input}"
         [Market Data]: {market_context}
+        
         {lang_instruction}
         
         **MISSION: DECODE ALPHA.**
         
         **Analysis Framework:**
-        1.  **🕵️‍♂️ Priced-in Check:** Is this "Old News"?
-        2.  **⚖️ Bluff vs. Reality:** Rhetoric vs Action.
+        1.  **🕵️‍♂️ Priced-in Check:** Is this "Old News"? If Trump tweeted 3 days ago, the market already knows. Don't be a sucker.
+        2.  **⚖️ Bluff vs. Reality:** For political events, distinguish "Rhetoric" (Threats) from "Action" (Executive Orders).
         3.  **🧠 The Verdict:**
-            - **🟢 AGGRESSIVE BUY:** Odds < 20% & New Intel.
-            - **🟡 CONTRARIAN:** Market Overreaction.
-            - **⚪ WAIT:** Priced in.
+            - **🟢 AGGRESSIVE BUY:** If market is asleep (Odds < 20%) and news is NEW/REAL.
+            - **🟡 CONTRARIAN:** If market is overreacting to fake news.
+            - **⚪ WAIT:** If news is priced in.
         
         **Output Format:**
         > One sentence sleek summary.
+        
         ### 🧠 Strategic Analysis
         * **Market Psychology:** ...
         * **Risk/Reward:** ...
@@ -243,125 +302,146 @@ def consult_holmes(user_input, market_data):
 
 # ================= 🖥️ 5. MAIN INTERFACE =================
 
-# --- A. 侧边栏：实时行情 ---
+# --- A. 侧边栏：实时行情 Ticker (Top 10) ---
+# 保持你原来的逻辑不动
 with st.sidebar:
-    st.markdown("### 📡 LIVE TICKER")
+    st.markdown("### 📡 LIVE FEED")
+    st.caption("Top 10 Active Markets")
+    
     if KEYS_LOADED:
         try:
+            # 拉取 Top 10 Active Markets
             url = "https://gamma-api.polymarket.com/markets?limit=10&sort=volume&closed=false"
             live_mkts = requests.get(url, timeout=3).json()
+            
             for m in live_mkts:
                 p = normalize_data(m)
                 if p:
                     st.markdown(f"""
                     <div class="ticker-item">
-                        <span class="ticker-title">{p['title']}</span>
+                        <span class="ticker-title" title="{p['title']}">{p['title']}</span>
                         <span class="ticker-price">{p['odds']}</span>
-                        <span style="color:#555; float:right; font-size:0.75rem;">${p['volume']/1000000:.1f}M</span>
+                        <span class="ticker-vol">${p['volume']/1000000:.1f}M</span>
                     </div>
                     """, unsafe_allow_html=True)
-        except: st.warning("Connecting...")
+        except:
+            st.warning("⚠️ Connection slow...")
     else:
-        st.error("Keys Missing")
-    
+        st.error("🔒 Keys Missing")
+        st.caption("Please add EXA_API_KEY and GOOGLE_API_KEY to Streamlit Secrets.")
+
     st.markdown("---")
-    st.caption("ℹ️ Data from Polymarket Gamma API")
+    if KEYS_LOADED:
+        st.success("🟢 System: **Online**")
+    else:
+        st.error("🔴 System: **Offline**")
 
-# --- B. 主界面 ---
+# --- B. 主界面顶部 (移除顶部的 Manual 按钮，只保留标题) ---
 st.title("Be Holmes")
-st.caption("THE GENIUS TRADER | V2.5 MOBILE PRO")
+st.caption("THE GENIUS TRADER | V2.6 MOBILE POLISH")
 
-# 状态栏 (提示侧边栏存在)
-if KEYS_LOADED:
-    st.markdown('<p class="status-bar">🟢 System Online | 📡 <span style="color:#555;">Live Feed in Sidebar (Top Left >)</span></p>', unsafe_allow_html=True)
+st.markdown("---")
 
-st.markdown("<br>", unsafe_allow_html=True)
-
-# 输入区
-user_news = st.text_area("Intelligence Injection...", height=120, placeholder="Paste Intel here... (e.g. 特朗普宣布2月1日加征关税 / SpaceX IPO)")
+# --- C. 核心交互区 ---
+user_news = st.text_area("Input Intel / News...", height=120, placeholder="Paste news here... (e.g. 特朗普宣布2月1日加征关税 / SpaceX IPO)")
 ignite_btn = st.button("🔍 DECODE ALPHA", use_container_width=True)
 
-# 执行逻辑
 if ignite_btn:
     if not KEYS_LOADED:
-        st.error("❌ API Keys not found in Secrets.")
+        st.error("❌ API Keys not found. Please set them in Streamlit Secrets.")
     elif not user_news:
-        st.warning("⚠️ Evidence required for analysis.")
+        st.warning("⚠️ Please input intel first.")
     else:
-        with st.status("🧠 Holmes is processing...", expanded=True) as status:
-            st.write("🛰️ Exa Neural Engine: Semantic Mapping...")
+        with st.status("🧠 Holmes is thinking...", expanded=True) as status:
+            # 1. Search
+            st.write("🛰️ Exa Sniper: Scanning Polymarket...")
             matches, keyword = search_with_exa(user_news)
             
             if matches:
-                st.write(f"✅ Contract Locked: {matches[0]['title']}")
+                st.write(f"✅ Target Locked: {matches[0]['title']}")
             else:
-                st.warning(f"⚠️ No direct asset found for '{keyword}'. Switching to Macro Inference.")
+                st.warning(f"⚠️ No direct contract found for '{keyword}'. Switching to Macro Mode.")
             
-            st.write("⚖️ Bayesian Inference Running...")
+            # 2. Analyze
+            st.write("⚖️ Calculating Bayesian Probabilities...")
             report = consult_holmes(user_news, matches)
-            status.update(label="✅ Alpha Generated", state="complete", expanded=False)
+            status.update(label="✅ Strategy Ready", state="complete", expanded=False)
 
+        # 3. 结果展示 (美化版)
         if matches:
             m = matches[0]
-            st.markdown("### 🎯 Target Asset")
+            st.markdown("### 🎯 Target Contract")
             st.markdown(f"""
             <div class="market-card">
                 <div class="card-title">{m['title']}</div>
                 <div style="display:flex; justify-content:space-between; align-items:flex-end;">
                     <div>
                         <span class="card-stat">{m['odds']}</span>
-                        <div class="card-sub">Implied Probability</div>
+                        <div class="card-sub">Current Probability</div>
                     </div>
                     <div style="text-align:right;">
                         <span style="color:#CCC; font-weight:bold;">${m['volume']:,.0f}</span>
-                        <div class="card-sub">24h Volume</div>
+                        <div class="card-sub">Volume</div>
                     </div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
             
             link = f"https://polymarket.com/event/{m['slug']}"
-            st.markdown(f"<a href='{link}' target='_blank'><button class='stButton' style='width:100%; background:#D90429; color:white; padding:12px; border-radius:6px; border:none; font-weight:bold; cursor:pointer;'>🚀 EXECUTE TRADE</button></a>", unsafe_allow_html=True)
+            st.markdown(f"<a href='{link}' target='_blank'><button class='stButton' style='width:100%; border-radius:8px; background:#D90429; color:white; padding:10px; border:none; font-weight:bold; cursor:pointer;'>🚀 TRADE ON POLYMARKET</button></a>", unsafe_allow_html=True)
 
         st.markdown("### 🧠 Strategic Report")
         st.markdown(f"<div class='report-box'>{report}</div>", unsafe_allow_html=True)
 
-# --- C. 底部 Manual (不喧宾夺主，专业范) ---
+# --- D. 底部 Manual (低调、专业、致谢 Exa.ai) ---
 st.markdown("<br><br><br>", unsafe_allow_html=True)
 st.markdown("---")
 
-# 使用 Expander 折叠起来，默认不显示，不抢主界面
-with st.expander("📘 OPERATIONAL PROTOCOL & CREDIT"):
+# 使用 Expander 折叠，不抢占视觉中心
+with st.expander("📘 OPERATIONAL PROTOCOL (MANUAL)"):
+    # 语言切换 (Radio Button)
+    lang_mode = st.radio("Display Language / 显示语言", ["English", "中文"], horizontal=True)
+    st.markdown("<br>", unsafe_allow_html=True)
     
-    # 1. Exa.ai 致谢 (专业卡片)
+    if lang_mode == "中文":
+        st.markdown("""
+        #### 1. 系统架构 (System Architecture)
+        **Be Holmes** 是一个基于 **RAG (检索增强生成)** 架构的去中心化金融情报终端。
+        * **语义层 (Semantic Layer):** 利用 **Exa.ai** 的神经搜索能力，将非结构化的中文自然语言（如舆情、谣言）实时映射为链上资产的英文实体。
+        * **博弈层 (Game Theory Layer):** 利用 **Gemini Pro** 的推理能力，基于贝叶斯概率论计算市场共识与实际情报之间的预期差 (Expectation Gap)。
+
+        #### 2. 操作协议 (Operational Protocol)
+        * **情报注入:** 输入任何可能影响市场的文本情报。
+        * **风险评估:** 系统会自动执行 "Priced-in Check"（已定价检测），防止在消息已被市场消化时追高。
+        * **信号输出:** * 🟢 **Aggressive Buy:** 市场定价偏差显著，存在 Alpha 机会。
+            * ⚪ **Wait:** 市场已反应，风险收益比低。
+        
+        #### 3. 风险披露 (Risk Disclosure)
+        本终端仅提供概率测算辅助，预测市场具有极高波动性，不构成直接投资建议。
+        """)
+    else:
+        st.markdown("""
+        #### 1. System Architecture
+        **Be Holmes** is an **RAG-based** decentralized financial intelligence terminal.
+        * **Semantic Layer:** Powered by **Exa.ai Neural Search** to map unstructured natural language to on-chain asset entities in real-time.
+        * **Game Theory Layer:** Powered by **Gemini Pro** to calculate the Expectation Gap between market consensus and new intelligence using Bayesian inference.
+
+        #### 2. Operational Protocol
+        * **Intel Injection:** Input any text intelligence that might move the market.
+        * **Risk Assessment:** The system performs a "Priced-in Check" to prevent chasing highs on stale news.
+        * **Signal Output:**
+            * 🟢 **Aggressive Buy:** Significant mispricing detected (Alpha opportunity).
+            * ⚪ **Wait:** Market has already reacted; low risk/reward ratio.
+        
+        #### 3. Risk Disclosure
+        This terminal provides probabilistic analysis only. Prediction markets are highly volatile. Not financial advice.
+        """)
+    
+    # 致谢 Exa.ai (专业卡片风格)
+    st.markdown("---")
     st.markdown("""
-    <div style="background:#0F0F0F; padding:20px; border-radius:8px; border:1px solid #333; margin-bottom:20px;">
-        <div style="font-size:0.7rem; color:#666; font-weight:bold; letter-spacing:1px; margin-bottom:5px;">CORE SEMANTIC ENGINE</div>
-        <div style="font-size:1.5rem; color:#FF4B4B; font-weight:900; margin-bottom:5px;">POWERED BY Exa.ai</div>
-        <div style="font-size:0.85rem; color:#888;">
-            Utilizing state-of-the-art Neural Embeddings for cross-lingual intent mapping and entity resolution.
-        </div>
+    <div style="background-color: #0A0A0A; border: 1px solid #333; padding: 15px; border-radius: 8px; text-align: center;">
+        <span style="color: #666; font-size: 0.8rem; letter-spacing: 1px;">CORE SEARCH ENGINE POWERED BY</span><br>
+        <strong style="color: #FF4B4B; font-size: 1.2rem; font-family: 'JetBrains Mono', monospace;">Exa.ai Neural Embeddings</strong>
     </div>
     """, unsafe_allow_html=True)
-    
-    # 2. 专业协议内容
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("#### 🇨🇳 协议说明")
-        st.markdown("""
-        * **系统架构:** 基于 **RAG** 的异构金融数据决策终端。
-        * **语义层 (Semantic Layer):** 由 **Exa.ai** 提供支持，将中文模糊非结构化文本实时映射为链上资产实体。
-        * **推理层 (Inference Layer):** 集成 **Gemini Pro**，基于贝叶斯博弈论 (Bayesian Game Theory) 计算市场共识预期差。
-        * **信号定义:** * 🟢 **Aggressive Buy:** 市场定价偏差 > 30%。
-            * ⚪ **Priced-in:** 市场已充分消化该情报。
-        """)
-    with c2:
-        st.markdown("#### 🇺🇸 Protocol Specs")
-        st.markdown("""
-        * **Architecture:** **RAG-based** Heterogeneous Financial Decision Terminal.
-        * **Semantic Layer:** Powered by **Exa.ai**. Maps unstructured intent to on-chain assets via Neural Search.
-        * **Inference Layer:** **Gemini Pro** driven. Calculates Consensus Gaps using Bayesian models.
-        * **Signals:**
-            * 🟢 **Aggressive Buy:** Mispricing > 30%.
-            * ⚪ **Priced-in:** Information fully absorbed.
-        """)
