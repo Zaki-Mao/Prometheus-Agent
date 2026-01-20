@@ -640,27 +640,36 @@ with st.expander("Operational Protocol & System Architecture"):
     </div>
     """, unsafe_allow_html=True)
 
-# ================= ⚡ 底部实时滚动新闻条 (诊断修复版) =================
+# ================= ⚡ 底部实时滚动新闻条 (稳健修复版) =================
 
 @st.cache_data(ttl=300)
 def fetch_ticker_news():
     try:
-        # 1. 获取 Key
-        api_key = st.secrets["CRYPTOPANIC_API_KEY"]
+        # 1. 获取 Key 并清除可能存在的空格/回车符
+        # .strip() 是关键！它能把前后看不见的空白全删掉
+        api_key = st.secrets["CRYPTOPANIC_API_KEY"].strip()
         
-        # 2. 构造请求
-        # 增加 User-Agent 伪装成浏览器，防止被 API 当作机器人拦截
-        url = f"https://cryptopanic.com/api/v1/posts/?auth_token={api_key}&public=true&filter=rising&kind=news"
+        # 2. 定义基础 URL (不带问号和参数)
+        base_url = "https://cryptopanic.com/api/v1/posts/"
+        
+        # 3. 使用字典定义参数 (让 requests 自动处理拼接，防止出错)
+        params = {
+            "auth_token": api_key,
+            "public": "true",
+            "filter": "rising",
+            "kind": "news"
+        }
+        
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
         
-        # 3. 发送请求 (超时时间延长到 10秒)
-        resp = requests.get(url, headers=headers, timeout=10)
+        # 4. 发送请求 (让 requests 库接管参数)
+        resp = requests.get(base_url, params=params, headers=headers, timeout=10)
         
-        # 4. 诊断错误状态码
+        # 5. 诊断错误
         if resp.status_code != 200:
-            return [f"⚠️ API Error: Status {resp.status_code}", f"Msg: {resp.text[:60]}..."]
+            return [f"⚠️ API Error: {resp.status_code}", "Msg: Connection failed."]
             
         data = resp.json()
         news_items = []
@@ -668,22 +677,21 @@ def fetch_ticker_news():
         if "results" in data:
             for item in data["results"][:15]:
                 title = item["title"]
-                # 尝试获取代币代码
                 currencies = item.get("currencies")
                 code = f"[{currencies[0]['code']}]" if currencies else "⚡"
                 news_items.append(f"{code} {title}")
         
         if not news_items:
-            return ["⚠️ API Connected but returned NO news results."]
+            return ["⚠️ API Connected but returned NO news."]
             
         return news_items
 
     except Exception as e:
-        # 5. 捕获具体的 Python 报错（比如 ConnectionError）
         return [f"❌ System Error: {str(e)}"]
 
 # 获取新闻
 news_list = fetch_ticker_news()
+
 
 
 # 拼接字符串
@@ -730,6 +738,7 @@ st.markdown(f"""
 </div>
 <br><br><br>
 """, unsafe_allow_html=True)
+
 
 
 
