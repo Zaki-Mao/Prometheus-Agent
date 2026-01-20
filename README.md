@@ -10,6 +10,7 @@
 **Be Holmes** is an AI-native decision support system engineered to bridge the latency and semantic gap between unstructured global intelligence and decentralized prediction markets (e.g., Polymarket).
 
 In the domain of event derivatives, information asymmetry exists between off-chain breaking news and on-chain probability pricing. Be Holmes functions as an end-to-end **Retrieval-Augmented Generation (RAG)** agent. It ingests raw intelligence, semantically maps it to live prediction contracts via neural search, and utilizes Large Language Models (LLMs) to compute an "Alpha Verdict" based on Bayesian inference logic.
+<img width="3816" height="1892" alt="image" src="https://github.com/user-attachments/assets/817cc624-34f7-4fac-b973-fb1c1c808b77" />
 
 ---
 
