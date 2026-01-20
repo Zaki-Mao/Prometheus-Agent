@@ -640,7 +640,74 @@ with st.expander("Operational Protocol & System Architecture"):
     </div>
     """, unsafe_allow_html=True)
 
+# ================= ⚡ 底部实时滚动新闻条 (NEWS TICKER) =================
 
+# 1. 定义模拟新闻数据 (实际项目中这里可以接 API)
+ticker_news = [
+    "⚡ BREAKING: Bitcoin surges past $72,000 on ETF inflows.",
+    "📈 POLYMARKET: 'Trump 2024' volume hits all-time high of $100M.",
+    "🚨 FED ALERT: Powell signals rate cuts likely in Q3.",
+    "🌍 GEOPOLITICS: Tensions rise in Middle East, oil prices up 2%.",
+    "🤖 AI NEWS: OpenAI releases GPT-5 preview for developers.",
+    "📉 MARKET: S&P 500 closes slightly lower ahead of CPI data."
+]
+
+# 将新闻拼接成一个长字符串，中间用原本的间隔符隔开
+news_string = " &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; /// &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ".join(ticker_news)
+
+# 2. 注入 CSS 和 HTML
+# 使用 position: fixed; bottom: 0; 让它永远吸附在屏幕最下方
+st.markdown(f"""
+<style>
+    /* 底部容器样式 */
+    .news-ticker-container {{
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        background-color: #0f172a; /* 深蓝黑色背景 */
+        border-top: 1px solid #dc2626; /* 顶部红线 */
+        color: #e2e8f0;
+        font-family: 'Inter', monospace;
+        font-size: 0.9rem;
+        padding: 8px 0;
+        z-index: 9999; /* 保证在最上层 */
+        overflow: hidden;
+        white-space: nowrap;
+        box-shadow: 0 -4px 15px rgba(0,0,0,0.5);
+    }}
+
+    /* 滚动动画定义 */
+    .ticker-wrap {{
+        width: 100%;
+        overflow: hidden;
+    }}
+    
+    .ticker-move {{
+        display: inline-block;
+        white-space: nowrap;
+        animation: ticker 30s linear infinite; /* 30秒滚完一圈，无限循环 */
+    }}
+    
+    @keyframes ticker {{
+        0% {{ transform: translate3d(100%, 0, 0); }}
+        100% {{ transform: translate3d(-100%, 0, 0); }}
+    }}
+    
+    /* 鼠标放上去暂停，方便阅读 */
+    .ticker-wrap:hover .ticker-move {{
+        animation-play-state: paused;
+    }}
+</style>
+
+<div class="news-ticker-container">
+    <div class="ticker-wrap">
+        <div class="ticker-move">
+            {news_string}
+        </div>
+    </div>
+</div>
+<br><br><br> """, unsafe_allow_html=True)
 
 
 
