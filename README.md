@@ -1,4 +1,4 @@
-# Be Holmes | Prediction Market Intelligence Terminal
+# Be Holmes | AI-Driven News Analysis Agent for PolyMarket
 
 ![Version](https://img.shields.io/badge/Version-1.0.0-blue?style=flat-square)
 ![Build](https://img.shields.io/badge/Build-Stable-success?style=flat-square)
