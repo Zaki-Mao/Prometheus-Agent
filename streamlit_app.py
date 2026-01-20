@@ -33,150 +33,174 @@ st.set_page_config(
     page_title="Be Holmes | Research",
     page_icon="🕵️‍♂️",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed" # 默认收起侧边栏，因为主要内容移到了底部
 )
 
-# ================= 🎨 2. RESEARCH UI THEME (GOOGLE STYLE) =================
+# ================= 🎨 2. RESEARCH UI THEME (UPDATED) =================
 st.markdown("""
 <style>
-    /* 引入字体：Inter (Google Font 常用替代) */
+    /* 引入字体 */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;900&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
 
-    /* 全局背景：模拟 Google Research 的深空感 */
+    /* 1. 全局背景：地球图片 + 黑色遮罩 */
     .stApp {
-        background-color: #000000;
-        background-image: radial-gradient(circle at 50% 30%, #1a1a1a 0%, #000000 70%);
+        background-image: linear-gradient(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.9)), 
+                          url('https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=2072&auto=format&fit=crop');
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
         font-family: 'Inter', sans-serif;
     }
 
-    /* 顶部导航栏处理：透明，且保留侧边栏按钮 */
+    /* 顶部导航栏透明 */
     header[data-testid="stHeader"] { background-color: transparent !important; }
-    [data-testid="stToolbar"] { visibility: hidden; } /* 只隐藏右边的菜单，不隐藏左边的侧边栏开关 */
+    [data-testid="stToolbar"] { visibility: hidden; }
     [data-testid="stDecoration"] { visibility: hidden; }
 
-    /* ========== 核心排版：中心化布局 ========== */
-    
-    /* 标题样式：复刻图片的大字体 */
+    /* 标题样式 */
     .hero-title {
         font-family: 'Inter', sans-serif;
-        font-weight: 400; /* 细体更显高级 */
-        font-size: 5rem;
+        font-weight: 700;
+        font-size: 4.5rem;
         color: #ffffff;
         text-align: center;
         letter-spacing: -2px;
-        margin-bottom: 10px;
-        padding-top: 5vh;
+        margin-bottom: 5px;
+        padding-top: 8vh;
+        text-shadow: 0 0 20px rgba(0,0,0,0.5);
     }
     
-    /* 副标题样式 */
     .hero-subtitle {
         font-family: 'Plus Jakarta Sans', sans-serif;
         font-size: 1.1rem;
-        color: #9aa0a6; /* Google Grey */
+        color: #9ca3af; 
         text-align: center;
-        margin-bottom: 40px;
+        margin-bottom: 50px;
         font-weight: 400;
     }
 
-    /* 输入框容器居中 */
+    /* 4. 输入框美化：去除默认框，添加 Focus 红色光晕 */
     div[data-testid="stVerticalBlock"] > div {
         display: flex;
         flex-direction: column;
         align-items: center;
     }
-
-    /* 输入框美化：模拟搜索条 */
     .stTextArea { width: 100% !important; max-width: 800px !important; }
+    
     .stTextArea textarea {
-        background-color: rgba(255, 255, 255, 0.05) !important;
-        color: #e8eaed !important;
-        border: 1px solid #5f6368 !important;
-        border-radius: 24px !important; /* 圆角药丸 */
+        background-color: rgba(31, 41, 55, 0.6) !important; /* gray-800/60 */
+        color: #ffffff !important;
+        border: 1px solid #374151 !important; /* gray-700 */
+        border-radius: 16px !important;
         padding: 15px 25px !important;
         font-size: 1.1rem !important;
-        text-align: center; /* 输入文字居中 */
-    }
-    .stTextArea textarea:focus {
-        border-color: #e8eaed !important;
-        background-color: rgba(255, 255, 255, 0.1) !important;
-        box-shadow: 0 0 15px rgba(255,255,255,0.1);
-    }
-
-    /* 按钮美化：图片里的黄色/淡色按钮风格 */
-    .stButton button {
-        background: #e8eaed !important;
-        color: #202124 !important;
-        border: none !important;
-        border-radius: 50px !important;
-        padding: 12px 30px !important;
-        font-weight: 600 !important;
-        font-size: 1rem !important;
-        margin-top: 20px !important;
+        text-align: center;
+        backdrop-filter: blur(10px);
         transition: all 0.3s ease;
     }
-    .stButton button:hover {
-        transform: scale(1.05);
-        background: #ffffff !important;
-        box-shadow: 0 0 20px rgba(255,255,255,0.2);
+    
+    /* 关键：Focus 状态改为红色系 */
+    .stTextArea textarea:focus {
+        border-color: rgba(239, 68, 68, 0.5) !important; /* red-500/50 */
+        box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2) !important;
+        background-color: rgba(31, 41, 55, 0.9) !important;
     }
 
-    /* ========== 结果卡片 (保持深色以适配背景) ========== */
-    .market-card {
-        background: rgba(32, 33, 36, 0.6); /* 半透明黑 */
-        border: 1px solid #3c4043;
-        border-radius: 16px;
-        padding: 25px;
-        margin: 20px auto; /* 居中 */
-        max-width: 800px;
-        backdrop-filter: blur(10px);
+    /* 3. 按钮美化：红色渐变 */
+    .stButton button {
+        background: linear-gradient(to right, #7f1d1d, #b91c1c, #7f1d1d) !important; /* red-900 via red-700 */
+        color: #ffffff !important;
+        border: 1px solid rgba(239, 68, 68, 0.3) !important;
+        border-radius: 50px !important;
+        padding: 12px 40px !important;
+        font-weight: 600 !important;
+        font-size: 1rem !important;
+        margin-top: 10px !important;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     }
-    .card-title { font-size: 1.3rem; color: #e8eaed; margin-bottom: 15px; font-weight: 600; }
-    .card-stat { font-family: 'Plus Jakarta Sans', sans-serif; color: #8ab4f8; /* Google Blue */ font-size: 2rem; font-weight: 700; }
-    
-    /* 报告盒子 */
-    .report-box {
-        background: transparent;
-        border-left: 2px solid #5f6368;
+    .stButton button:hover {
+        transform: scale(1.03);
+        box-shadow: 0 0 15px rgba(220, 38, 38, 0.4); /* red glow */
+    }
+
+    /* 结果卡片 */
+    .market-card {
+        background: rgba(17, 24, 39, 0.7);
+        border: 1px solid #374151;
+        border-radius: 12px;
         padding: 20px;
         margin: 20px auto;
         max-width: 800px;
-        color: #bdc1c6;
-        font-size: 1rem;
-        line-height: 1.8;
+        backdrop-filter: blur(8px);
     }
 
-    /* ========== 底部 Manual Expander ========== */
-    .streamlit-expanderHeader {
-        background-color: transparent !important;
-        color: #5f6368 !important;
-        border: none !important;
-        font-size: 0.9rem !important;
+    /* 2. 底部 Top 10 Grid 样式 */
+    .top10-container {
+        max-width: 1000px;
+        margin: 60px auto 20px auto;
+        padding: 0 20px;
+    }
+    .top10-header {
+        font-size: 0.9rem;
+        color: #9ca3af;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 20px;
+        border-left: 3px solid #dc2626; /* red accent */
+        padding-left: 10px;
+    }
+    .top10-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+        gap: 15px;
+    }
+    .market-item {
+        background: rgba(17, 24, 39, 0.6);
+        border: 1px solid #374151;
+        border-radius: 8px;
+        padding: 12px 16px;
         display: flex;
-        justify-content: center; /* 居中显示 */
+        justify-content: space-between;
+        align-items: center;
+        transition: border-color 0.2s;
     }
-    div[data-testid="stExpander"] {
-        max-width: 800px;
-        margin: 0 auto;
-        border: 1px solid #3c4043;
-        border-radius: 12px;
-        background: rgba(0,0,0,0.5);
+    .market-item:hover {
+        border-color: #6b7280;
     }
-
-    /* ========== 侧边栏微调 ========== */
-    [data-testid="stSidebar"] {
-        background-color: #000000;
-        border-right: 1px solid #3c4043;
+    .m-title {
+        color: #e5e7eb;
+        font-size: 0.9rem;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 60%;
     }
-
-    /* 手机端适配 */
-    @media only screen and (max-width: 768px) {
-        .hero-title { font-size: 3rem !important; margin-top: 20px; }
-        .stTextArea textarea { text-align: left !important; } /* 手机上左对齐好输入 */
+    .m-odds {
+        display: flex;
+        gap: 8px;
+        font-family: 'Inter', monospace;
+        font-size: 0.75rem;
+    }
+    .tag-yes {
+        background: rgba(20, 83, 45, 0.3);
+        color: #4ade80;
+        border: 1px solid rgba(22, 101, 52, 0.5);
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+    .tag-no {
+        background: rgba(127, 29, 29, 0.3);
+        color: #f87171;
+        border: 1px solid rgba(153, 27, 27, 0.5);
+        padding: 2px 6px;
+        border-radius: 4px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 🧠 3. LOGIC CORE (UNCHANGED) =================
+# ================= 🧠 3. LOGIC CORE =================
 
 def detect_language(text):
     for char in text:
@@ -213,7 +237,41 @@ def search_with_exa(query):
     except Exception as e: print(f"Search error: {e}")
     return markets_found, search_query
 
+# 缓存 Top 10 数据，避免刷新过慢
+@st.cache_data(ttl=60)
+def fetch_top_10_markets():
+    try:
+        url = "https://gamma-api.polymarket.com/markets?limit=10&sort=volume&closed=false"
+        resp = requests.get(url, timeout=5).json()
+        markets = []
+        for m in resp:
+            # 解析 Yes/No 价格
+            try:
+                outcomes = json.loads(m.get('outcomes', '[]'))
+                prices = json.loads(m.get('outcomePrices', '[]'))
+                
+                # 默认寻找 Yes 和 No
+                yes_price = 0
+                no_price = 0
+                
+                if len(outcomes) >= 2 and len(prices) >= 2:
+                    yes_price = int(float(prices[0]) * 100)
+                    no_price = int(float(prices[1]) * 100)
+                
+                markets.append({
+                    "title": m.get('question', 'Unknown Market'),
+                    "yes": yes_price,
+                    "no": no_price,
+                    "slug": m.get('slug', '') or m.get('market_slug', '')
+                })
+            except:
+                continue
+        return markets
+    except:
+        return []
+
 def fetch_poly_details(slug):
+    # (保持原有的详情获取逻辑)
     valid_markets = []
     try:
         url = f"https://gamma-api.polymarket.com/events?slug={slug}"
@@ -290,54 +348,30 @@ def consult_holmes(user_input, market_data):
         return model.generate_content(prompt).text
     except Exception as e: return f"AI Error: {e}"
 
-# ================= 🖥️ 4. MAIN INTERFACE (CENTERED LAYOUT) =================
+# ================= 🖥️ 4. MAIN INTERFACE =================
 
-# 1. 侧边栏 (保持原样，提供 Live Feed)
-with st.sidebar:
-    st.markdown("### 📡 Market Feed")
-    if KEYS_LOADED:
-        try:
-            url = "https://gamma-api.polymarket.com/markets?limit=10&sort=volume&closed=false"
-            live_mkts = requests.get(url, timeout=3).json()
-            for m in live_mkts:
-                p = normalize_data(m)
-                if p:
-                    st.markdown(f"""
-                    <div style="padding:10px 0; border-bottom:1px solid #333; font-size:0.8rem;">
-                        <div style="color:#ccc; margin-bottom:3px;">{p['title']}</div>
-                        <span style="color:#8ab4f8; font-weight:bold;">{p['odds']}</span>
-                        <span style="float:right; color:#666;">${p['volume']/1000000:.1f}M</span>
-                    </div>
-                    """, unsafe_allow_html=True)
-        except: st.warning("Loading...")
-    else:
-        st.error("Keys Missing")
-    st.markdown("---")
-    st.caption("Live Data from Polymarket")
-
-# 2. 核心主页 (仿 Google Research 布局)
-
-# 2.1 标题区 (Hero Section)
+# 4.1 标题区 (Hero Section)
 st.markdown('<h1 class="hero-title">Be Holmes</h1>', unsafe_allow_html=True)
 st.markdown('<p class="hero-subtitle">Explore the world\'s prediction markets with neural search.</p>', unsafe_allow_html=True)
 
-# 2.2 搜索区 (Search Bar) - 使用 Columns 居中
-# 这里的 CSS 已经强制 Text Area 宽度，并居中内容
-user_news = st.text_area("Input", height=60, placeholder="Search for a market, region or event...", label_visibility="collapsed")
+# 4.2 搜索区 (Input)
+# 创建居中容器布局
+_, mid, _ = st.columns([1, 6, 1])
+with mid:
+    user_news = st.text_area("Input", height=70, placeholder="Search for a market, region or event...", label_visibility="collapsed")
 
-# 2.3 按钮区
-c1, c2, c3 = st.columns([1, 1, 1])
-with c2: # 按钮居中
+# 4.3 按钮区 (Button)
+_, btn_col, _ = st.columns([1, 2, 1])
+with btn_col:
     ignite_btn = st.button("Decode Alpha", use_container_width=True)
 
-# 2.4 执行逻辑与结果展示
+# 4.4 执行逻辑与结果
 if ignite_btn:
     if not KEYS_LOADED:
         st.error("🔑 API Keys not found in Secrets.")
     elif not user_news:
         st.warning("Please enter intelligence to analyze.")
     else:
-        # 结果容器 (也是居中的)
         with st.container():
             st.markdown("---")
             with st.status("Running Neural Analysis...", expanded=True) as status:
@@ -351,56 +385,57 @@ if ignite_btn:
                 m = matches[0]
                 st.markdown(f"""
                 <div class="market-card">
-                    <div class="card-title">{m['title']}</div>
+                    <div style="font-size:1.2rem; color:#e5e7eb; margin-bottom:10px;">{m['title']}</div>
                     <div style="display:flex; justify-content:space-between; align-items:flex-end;">
                         <div>
-                            <div class="card-stat">{m['odds']}</div>
-                            <div style="color:#9aa0a6; font-size:0.8rem;">Implied Probability</div>
+                            <div style="font-family:'Plus Jakarta Sans'; color:#4ade80; font-size:1.8rem; font-weight:700;">{m['odds']}</div>
+                            <div style="color:#9ca3af; font-size:0.8rem;">Implied Probability</div>
                         </div>
                         <div style="text-align:right;">
-                            <div style="color:#e8eaed; font-weight:600; font-size:1.2rem;">${m['volume']:,.0f}</div>
-                            <div style="color:#9aa0a6; font-size:0.8rem;">Volume</div>
+                            <div style="color:#e5e7eb; font-weight:600; font-size:1.2rem;">${m['volume']:,.0f}</div>
+                            <div style="color:#9ca3af; font-size:0.8rem;">Volume</div>
                         </div>
                     </div>
-                    <hr style="border-color:#3c4043; margin:15px 0;">
-                    <a href="https://polymarket.com/event/{m['slug']}" target="_blank" style="text-decoration:none;">
-                        <div style="text-align:center; color:#8ab4f8; font-weight:bold; cursor:pointer;">
-                            OPEN MARKET ↗
-                        </div>
-                    </a>
                 </div>
                 """, unsafe_allow_html=True)
+                
+            st.markdown(f"<div style='background:transparent; border-left:3px solid #dc2626; padding:15px 20px; color:#d1d5db; line-height:1.6;'>{report}</div>", unsafe_allow_html=True)
 
-            st.markdown(f"<div class='report-box'>{report}</div>", unsafe_allow_html=True)
+# ================= 📉 5. BOTTOM SECTION: TOP 10 MARKETS =================
 
-# 2.5 底部 Manual (沉浸式，低调)
-st.markdown("<br><br><br>", unsafe_allow_html=True)
+# 获取 Top 10 数据
+top10_markets = fetch_top_10_markets()
 
-with st.expander("Explore Protocol & Credits"):
-    
-    # Exa.ai 致谢 (极简风格)
-    st.markdown("""
-    <div style="display:flex; align-items:center; justify-content:center; margin-bottom:20px; gap:10px;">
-        <span style="color:#9aa0a6; font-size:0.9rem;">Powered by</span>
-        <span style="color:#ffffff; font-weight:bold; font-size:1.1rem; font-family:'Inter',sans-serif;">Exa.ai Neural Search</span>
+if top10_markets:
+    # 构建 HTML Grid
+    markets_html = ""
+    for m in top10_markets:
+        markets_html += f"""
+        <div class="market-item">
+            <div class="m-title" title="{m['title']}">{m['title']}</div>
+            <div class="m-odds">
+                <span class="tag-yes">Yes {m['yes']}¢</span>
+                <span class="tag-no">No {m['no']}¢</span>
+            </div>
+        </div>
+        """
+
+    # 渲染底部区域
+    st.markdown(f"""
+    <div class="top10-container">
+        <div class="top10-header">Trending on Polymarket (Top 10)</div>
+        <div class="top10-grid">
+            {markets_html}
+        </div>
     </div>
     """, unsafe_allow_html=True)
-    
-    # 协议内容
-    lang = st.radio("Language", ["English", "中文"], horizontal=True)
-    if lang == "中文":
-        st.markdown("""
-        **操作协议:**
-        1. **输入:** 在上方搜索框输入任何自然语言（新闻、谣言、分析）。
-        2. **处理:** Exa.ai 神经引擎将语义映射到链上合约。
-        3. **决策:** Gemini 模型基于贝叶斯逻辑计算预期差。
-        *免责声明: 仅供参考，不构成投资建议。*
-        """)
-    else:
-        st.markdown("""
-        **Operational Protocol:**
-        1. **Input:** Enter any natural language text above.
-        2. **Process:** Exa.ai neural engine maps semantics to on-chain contracts.
-        3. **Verdict:** Gemini calculates expectation gaps using Bayesian logic.
-        *Disclaimer: Not financial advice.*
-        """)
+
+# 底部折叠菜单
+st.markdown("<br>", unsafe_allow_html=True)
+with st.expander("Explore Protocol & Credits"):
+    st.markdown("""
+    <div style="text-align:center; color:#6b7280; font-size:0.9rem;">
+        Powered by <b>Exa.ai</b> & <b>Google Gemini</b><br>
+        Data source: Polymarket Gamma API
+    </div>
+    """, unsafe_allow_html=True)
