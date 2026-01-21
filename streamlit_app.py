@@ -1,408 +1,653 @@
-import reflex as rx
+import streamlit as st
 import requests
 import json
 import google.generativeai as genai
 import re
-import os
-from exa_py import Exa
 
-# ================= 🔐 0. KEY CONFIG =================
-# Reflex 自动从 .env 加载环境变量
-EXA_API_KEY = os.getenv("EXA_API_KEY")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-CRYPTOPANIC_API_KEY = os.getenv("CRYPTOPANIC_API_KEY")
+# ================= 🔐 0. KEY MANAGEMENT =================
+try:
+    EXA_API_KEY = st.secrets["EXA_API_KEY"]
+    GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+    KEYS_LOADED = True
+except FileNotFoundError:
+    EXA_API_KEY = None
+    GOOGLE_API_KEY = None
+    KEYS_LOADED = False
+except KeyError:
+    EXA_API_KEY = st.secrets.get("EXA_API_KEY", None)
+    GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", None)
+    KEYS_LOADED = bool(EXA_API_KEY and GOOGLE_API_KEY)
 
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
 
-# ================= 🧠 1. STATE MANAGEMENT (后端逻辑) =================
-class State(rx.State):
-    """应用的状态和逻辑都在这里"""
-    user_news: str = ""
-    analysis_result: str = ""
-    is_loading: bool = False
+# ================= 🛠️ DEPENDENCY CHECK =================
+try:
+    from exa_py import Exa
+    EXA_AVAILABLE = True
+except ImportError:
+    EXA_AVAILABLE = False
+
+# ================= 🕵️‍♂️ 1. SYSTEM CONFIGURATION =================
+st.set_page_config(
+    page_title="Be Holmes | Research",
+    page_icon="🕵️‍♂️",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# ================= 🎨 2. UI THEME (UPDATED FOR CLICKABLE CARDS) =================
+st.markdown("""
+<style>
+    /* Import Fonts */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;900&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
+
+    /* 1. Global Background */
+    .stApp {
+        background-image: linear-gradient(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.9)), 
+                          url('https://upload.cc/i1/2026/01/20/s8pvXA.jpg');
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
+        font-family: 'Inter', sans-serif;
+    }
+
+    /* Transparent Header */
+    header[data-testid="stHeader"] { background-color: transparent !important; }
+    [data-testid="stToolbar"] { visibility: hidden; }
+    [data-testid="stDecoration"] { visibility: hidden; }
+
+    /* Hero Title */
+    .hero-title {
+        font-family: 'Inter', sans-serif;
+        font-weight: 700;
+        font-size: 4.5rem;
+        color: #ffffff;
+        text-align: center;
+        letter-spacing: -2px;
+        margin-bottom: 5px;
+        padding-top: 8vh;
+        text-shadow: 0 0 20px rgba(0,0,0,0.5);
+    }
     
-    # 市场数据
-    market_data: dict = {}
-    top_markets: list[dict] = []
+    .hero-subtitle {
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-size: 1.1rem;
+        color: #9ca3af; 
+        text-align: center;
+        margin-bottom: 50px;
+        font-weight: 400;
+    }
+
+    /* 4. Input Field Styling (已修复：左对齐 + 字体优化) */
+    div[data-testid="stVerticalBlock"] > div {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    .stTextArea { width: 100% !important; max-width: 800px !important; }
     
-    # 新闻滚动条
-    ticker_text: str = "Loading market intelligence..."
-
-    # --- 逻辑函数 (Event Handlers) ---
+    .stTextArea textarea {
+        background-color: rgba(31, 41, 55, 0.6) !important;
+        color: #ffffff !important;
+        border: 1px solid #374151 !important;
+        border-radius: 16px !important;
+        
+        /* 修改点在这里：左对齐，调整内边距，调整字号 */
+        padding: 15px 20px !important; 
+        font-size: 1rem !important; /* 从 1.1rem 改为 1rem */
+        text-align: left !important; /* 从 center 改为 left */
+        line-height: 1.6 !important; /* 增加行高，让中文更易读 */
+        
+        backdrop-filter: blur(10px);
+        transition: all 0.3s ease;
+    }
     
-    def on_load(self):
-        """页面加载时自动运行"""
-        self.fetch_top_10_markets()
-        self.fetch_ticker_news()
+    /* Input Focus - Red Glow */
+    .stTextArea textarea:focus {
+        border-color: rgba(239, 68, 68, 0.8) !important;
+        box-shadow: 0 0 15px rgba(220, 38, 38, 0.3) !important;
+        background-color: rgba(31, 41, 55, 0.9) !important;
+    }
 
-    async def run_analysis(self):
-        """点击 Decode Alpha 按钮时触发"""
-        if not self.user_news:
-            return
+    /* 3. Button Styling: Red Gradient */
+    div.stButton > button:first-child {
+        background: linear-gradient(90deg, #7f1d1d 0%, #dc2626 50%, #7f1d1d 100%) !important;
+        background-size: 200% auto !important;
+        color: #ffffff !important;
+        border: 1px solid rgba(239, 68, 68, 0.5) !important;
+        border-radius: 50px !important;
+        padding: 12px 50px !important;
+        font-weight: 600 !important;
+        font-size: 1.1rem !important;
+        margin-top: 10px !important;
+        transition: 0.5s !important;
+        box-shadow: 0 0 20px rgba(0,0,0,0.5) !important;
+    }
+    
+    div.stButton > button:first-child:hover {
+        background-position: right center !important;
+        transform: scale(1.05) !important;
+        box-shadow: 0 0 30px rgba(220, 38, 38, 0.6) !important;
+        border-color: #fca5a5 !important;
+    }
+    
+    div.stButton > button:first-child:active {
+        transform: scale(0.98) !important;
+    }
+
+    /* Result Card */
+    .market-card {
+        background: rgba(17, 24, 39, 0.7);
+        border: 1px solid #374151;
+        border-radius: 12px;
+        padding: 20px;
+        margin: 20px auto;
+        max-width: 800px;
+        backdrop-filter: blur(8px);
+    }
+
+    /* Bottom Grid Styling */
+    .top10-container {
+        width: 100%;
+        max-width: 1200px;
+        margin: 60px auto 20px auto;
+        padding: 0 20px;
+    }
+    .top10-header {
+        font-size: 0.9rem;
+        color: #9ca3af;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 20px;
+        border-left: 3px solid #dc2626;
+        padding-left: 10px;
+    }
+    
+    .top10-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 15px;
+    }
+
+    @media (max-width: 1000px) { .top10-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 600px) { .top10-grid { grid-template-columns: 1fr; } }
+
+    .market-item {
+        background: rgba(17, 24, 39, 0.6);
+        border: 1px solid #374151;
+        border-radius: 8px;
+        padding: 15px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        transition: all 0.2s;
+        backdrop-filter: blur(5px);
+        min-height: 110px;
         
-        self.is_loading = True
-        self.analysis_result = ""
-        self.market_data = {}
-        yield # 更新UI显示加载状态
+        text-decoration: none !important;
+        color: inherit !important;
+        cursor: pointer;
+    }
+    .market-item:hover {
+        border-color: #ef4444;
+        background: rgba(31, 41, 55, 0.9);
+        transform: translateY(-2px);
+    }
+    .m-title {
+        color: #e5e7eb;
+        font-size: 0.95rem;
+        font-weight: 500;
+        margin-bottom: 12px;
+        line-height: 1.4;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    .m-odds {
+        display: flex;
+        gap: 8px;
+        font-family: 'Inter', monospace;
+        font-size: 0.75rem;
+        margin-top: auto;
+    }
+    .tag-yes {
+        background: rgba(6, 78, 59, 0.4);
+        color: #4ade80;
+        border: 1px solid rgba(34, 197, 94, 0.3);
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-weight: 600;
+    }
+    .tag-no {
+        background: rgba(127, 29, 29, 0.4);
+        color: #f87171;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-weight: 600;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-        # 1. 搜索
-        matches, query = self._search_with_exa(self.user_news)
-        
-        # 2. 存储最相关的一个市场用于展示
-        if matches:
-            self.market_data = matches[0]
-        
-        # 3. AI 分析
-        self.analysis_result = self._consult_holmes(self.user_news, matches)
-        
-        self.is_loading = False
+# ================= 🧠 3. LOGIC CORE =================
 
-    # --- 内部辅助函数 (原样保留逻辑) ---
+def detect_language(text):
+    for char in text:
+        if '\u4e00' <= char <= '\u9fff': return "CHINESE"
+    return "ENGLISH"
 
-    def _generate_english_keywords(self, text):
-        try:
-            model = genai.GenerativeModel('gemini-2.5-flash')
-            prompt = f"""Task: Extract English search keywords for Polymarket. Input: "{text}". Output: Keywords only."""
-            resp = model.generate_content(prompt)
-            return resp.text.strip()
-        except: return text
+def generate_english_keywords(user_text):
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        prompt = f"""Task: Extract English search keywords for Polymarket. Input: "{user_text}". Output: Keywords only."""
+        resp = model.generate_content(prompt)
+        return resp.text.strip()
+    except: return user_text
 
-    def _search_with_exa(self, query):
-        if not EXA_API_KEY: return [], query
-        try:
-            search_query = self._generate_english_keywords(query)
-            exa = Exa(EXA_API_KEY)
-            search_response = exa.search(
-                f"prediction market about {search_query}",
-                num_results=4, type="neural", include_domains=["polymarket.com"]
-            )
-            markets_found = []
-            seen_ids = set()
-            if search_response and search_response.results:
-                for result in search_response.results:
-                    match = re.search(r'polymarket\.com/(?:event|market)/([^/]+)', result.url)
-                    if match:
-                        slug = match.group(1)
-                        if slug not in seen_ids:
-                            data = self._fetch_poly_details(slug)
-                            if data:
-                                markets_found.extend(data)
-                                seen_ids.add(slug)
-            return markets_found, search_query
-        except Exception as e:
-            print(f"Exa Error: {e}")
-            return [], query
-
-    def _fetch_poly_details(self, slug):
-        # ... (保留原有的 api 获取逻辑，稍微简化) ...
-        try:
-            url = f"https://gamma-api.polymarket.com/events?slug={slug}"
-            resp = requests.get(url, timeout=3).json()
-            valid = []
-            if isinstance(resp, list) and resp:
-                for m in resp[0].get('markets', [])[:2]:
-                    p = self._normalize_data(m)
-                    if p: valid.append(p)
-            return valid
-        except: return []
-
-    def _normalize_data(self, m):
-        try:
-            if m.get('closed') is True: return None
-            outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
-            prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
-            
-            odds_display = "N/A"
-            if outcomes and prices:
-                odds_display = f"{outcomes[0]}: {float(prices[0])*100:.1f}%"
-                
-            return {
-                "title": m.get('question', 'Unknown'),
-                "odds": odds_display,
-                "volume": float(m.get('volume', 0)),
-                "slug": m.get('slug', '') or m.get('market_slug', '')
-            }
-        except: return None
-
-    def _consult_holmes(self, user_input, market_data):
-        if not GOOGLE_API_KEY: return "AI Key Missing."
-        try:
-            model = genai.GenerativeModel('gemini-2.5-flash')
-            # 简单判断语言
-            lang_instruction = "Respond in CHINESE" if any('\u4e00' <= char <= '\u9fff' for char in user_input) else "Respond in ENGLISH"
-            
-            market_context = f"Target: {market_data[0]['title']} | Odds: {market_data[0]['odds']}" if market_data else "No specific market."
-            
-            prompt = f"""
-            You are **Be Holmes**, a rational Macro Hedge Fund Manager.
-            [Intel]: "{user_input}"
-            [Market Data]: {market_context}
-            {lang_instruction}
-            **MISSION: DECODE ALPHA.**
-            Analysis Framework: 1. Priced-in Check 2. Bluff vs Reality 3. Verdict.
-            Output as a concise professional briefing.
-            """
-            return model.generate_content(prompt).text
-        except Exception as e: return f"AI Error: {e}"
-
-    def fetch_top_10_markets(self):
-        # ... (保留原有的 Top 10 获取逻辑) ...
-        try:
-            url = "https://gamma-api.polymarket.com/events?limit=12&sort=volume&closed=false"
-            resp = requests.get(url, timeout=5).json()
-            markets = []
-            if isinstance(resp, list):
-                for event in resp:
-                    try:
-                        markets_raw = event.get('markets', [])
-                        if not markets_raw: continue
-                        # 简化处理逻辑适配 Reflex
-                        m = markets_raw[0] 
-                        outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
-                        prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
-                        
-                        yes_price = 50
-                        no_price = 50
-                        if outcomes and "Yes" in outcomes:
-                            idx = outcomes.index("Yes")
-                            yes_price = int(float(prices[idx]) * 100)
-                            no_price = 100 - yes_price
-                        
-                        markets.append({
-                            "title": event.get('title'),
-                            "yes": yes_price,
-                            "no": no_price,
-                            "slug": event.get('slug')
-                        })
-                    except: continue
-            self.top_markets = markets
-        except: pass
-
-    def fetch_ticker_news(self):
-        if not CRYPTOPANIC_API_KEY: return
-        try:
-            key = CRYPTOPANIC_API_KEY.strip().replace('"', '')
-            url = f"https://cryptopanic.com/api/developer/v2/posts/?auth_token={key}&public=true&filter=rising"
-            resp = requests.get(url, timeout=10)
-            data = resp.json()
-            items = []
-            if "results" in data:
-                for item in data["results"][:10]:
-                    code = f"[{item['currencies'][0]['code']}]" if item.get("currencies") else "⚡"
-                    items.append(f"{code} {item['title']}")
-            self.ticker_text = "      ///      ".join(items)
-        except: self.ticker_text = "News feed unavailable."
-
-
-# ================= 🎨 2. UI COMPONENTS =================
-
-def hero_section():
-    return rx.vstack(
-        rx.heading("Be Holmes", size="9", color="white", letter_spacing="-2px", text_align="center"),
-        rx.text("Explore the world's prediction markets with neural search.", color="#9ca3af", font_size="1.1rem"),
-        padding_top="8vh",
-        margin_bottom="50px",
-        align="center"
-    )
-
-def search_section():
-    return rx.vstack(
-        rx.text_area(
-            placeholder="Search for a market, region or event...",
-            value=State.user_news,
-            on_change=State.set_user_news,
-            bg="rgba(31, 41, 55, 0.6)",
-            color="white",
-            border="1px solid #374151",
-            border_radius="16px",
-            min_height="100px",
-            width="100%",
-            max_width="800px",
-            _focus={"border_color": "#ef4444", "box_shadow": "0 0 15px rgba(220, 38, 38, 0.3)"},
-        ),
-        rx.button(
-            "Decode Alpha",
-            on_click=State.run_analysis,
-            loading=State.is_loading,
-            bg="linear-gradient(90deg, #7f1d1d 0%, #dc2626 50%, #7f1d1d 100%)",
-            color="white",
-            border_radius="50px",
-            padding="20px 50px",
-            font_weight="600",
-            _hover={"transform": "scale(1.05)", "cursor": "pointer"},
-            margin_top="20px"
-        ),
-        align="center",
-        width="100%"
-    )
-
-def result_card():
-    """显示搜索到的市场卡片"""
-    return rx.cond(
-        State.market_data,
-        rx.box(
-            rx.vstack(
-                rx.text(State.market_data["title"], font_size="1.2rem", color="#e5e7eb", font_weight="bold"),
-                rx.hstack(
-                    rx.vstack(
-                        rx.text(State.market_data["odds"], font_size="1.8rem", color="#4ade80", font_weight="bold"),
-                        rx.text("Implied Probability", font_size="0.8rem", color="#9ca3af"),
-                        align="start"
-                    ),
-                    rx.spacer(),
-                    rx.vstack(
-                        rx.text(f"${State.market_data['volume']}", font_size="1.2rem", color="#e5e7eb"),
-                        rx.text("Volume", font_size="0.8rem", color="#9ca3af"),
-                        align="end"
-                    ),
-                    width="100%"
-                ),
-                width="100%"
-            ),
-            bg="rgba(17, 24, 39, 0.7)",
-            border="1px solid #374151",
-            border_radius="12px",
-            padding="20px",
-            margin_y="20px",
-            max_width="800px",
-            backdrop_filter="blur(8px)"
+def search_with_exa(query):
+    if not EXA_AVAILABLE or not EXA_API_KEY: return [], query
+    search_query = generate_english_keywords(query)
+    markets_found, seen_ids = [], set()
+    try:
+        exa = Exa(EXA_API_KEY)
+        search_response = exa.search(
+            f"prediction market about {search_query}",
+            num_results=4, type="neural", include_domains=["polymarket.com"]
         )
-    )
+        for result in search_response.results:
+            match = re.search(r'polymarket\.com/(?:event|market)/([^/]+)', result.url)
+            if match:
+                slug = match.group(1)
+                if slug not in ['profile', 'login', 'leaderboard', 'rewards'] and slug not in seen_ids:
+                    market_data = fetch_poly_details(slug)
+                    if market_data:
+                        markets_found.extend(market_data)
+                        seen_ids.add(slug)
+    except Exception as e: print(f"Search error: {e}")
+    return markets_found, search_query
 
-def analysis_report():
-    """显示 Gemini 分析报告"""
-    return rx.cond(
-        State.analysis_result,
-        rx.box(
-            rx.markdown(State.analysis_result),
-            bg="transparent",
-            border_left="3px solid #dc2626",
-            padding="15px 20px",
-            color="#d1d5db",
-            line_height="1.6",
-            margin_y="20px",
-            max_width="800px"
-        )
-    )
-
-def market_grid():
-    """底部 Top 10 市场网格"""
-    return rx.vstack(
-        rx.text("TRENDING ON POLYMARKET (Top 12)", color="#9ca3af", font_size="0.9rem", border_left="3px solid #dc2626", padding_left="10px"),
-        rx.grid(
-            rx.foreach(
-                State.top_markets,
-                lambda m: rx.link(
-                    rx.box(
-                        rx.text(m["title"], class_name="m-title", color="#e5e7eb", font_weight="500", no_of_lines=2),
-                        rx.hstack(
-                            rx.text(f"Yes {m['yes']}¢", bg="rgba(6, 78, 59, 0.4)", color="#4ade80", padding="2px 8px", border_radius="4px"),
-                            rx.text(f"No {m['no']}¢", bg="rgba(127, 29, 29, 0.4)", color="#f87171", padding="2px 8px", border_radius="4px"),
-                            margin_top="auto"
-                        ),
-                        bg="rgba(17, 24, 39, 0.6)",
-                        border="1px solid #374151",
-                        border_radius="8px",
-                        padding="15px",
-                        height="120px",
-                        display="flex",
-                        flex_direction="column",
-                        justify_content="space-between",
-                        backdrop_filter="blur(5px)",
-                        _hover={"border_color": "#ef4444", "bg": "rgba(31, 41, 55, 0.9)", "transform": "translateY(-2px)"},
-                        transition="all 0.2s"
-                    ),
-                    href=f"https://polymarket.com/event/{m['slug']}",
-                    is_external=True,
-                    text_decoration="none"
-                )
-            ),
-            columns="3",
-            spacing="4",
-            width="100%"
-        ),
-        width="100%",
-        max_width="1200px",
-        margin_top="60px",
-        padding_x="20px"
-    )
-
-def ticker_bar():
-    """底部新闻滚动条 (CSS Animation)"""
-    return rx.box(
-        rx.box(
-            rx.text(State.ticker_text, class_name="ticker-text"),
-            class_name="ticker-wrap"
-        ),
-        position="fixed",
-        bottom="0",
-        left="0",
-        width="100%",
-        bg="#0f172a",
-        border_top="1px solid #dc2626",
-        color="#e2e8f0",
-        padding="8px 0",
-        z_index="9999",
-        overflow="hidden",
-        white_space="nowrap"
-    )
-
-# ================= 🚀 MAIN PAGE LAYOUT =================
-
-def index():
-    return rx.box(
-        # 背景图设置
-        bg_image="url('https://upload.cc/i1/2026/01/20/s8pvXA.jpg')",
-        bg_size="cover",
-        bg_position="center",
-        bg_attachment="fixed",
-        min_height="100vh",
+# Cache Top 12 Data
+# 缓存 Top 12 数据 - 逻辑修正版 (修复 Yes/No 价格反转)
+@st.cache_data(ttl=60)
+def fetch_top_10_markets():
+    try:
+        url = "https://gamma-api.polymarket.com/events?limit=12&sort=volume&closed=false"
+        resp = requests.get(url, timeout=5).json()
         
-        # 内容容器
-        children=[
-            # 这里的 Box 充当遮罩层 (Overlay) 实现变暗效果
-            rx.box(
-                rx.vstack(
-                    hero_section(),
-                    search_section(),
-                    result_card(),
-                    analysis_report(),
-                    market_grid(),
-                    # 底部留白给 Ticker
-                    rx.box(height="100px"),
+        markets = []
+        
+        if isinstance(resp, list):
+            for event in resp:
+                try:
+                    title = event.get('title', 'Unknown Event')
+                    event_markets = event.get('markets', [])
                     
-                    align="center",
-                    width="100%",
-                    padding_bottom="50px"
-                ),
-                bg="rgba(0, 0, 0, 0.8)", # 黑色半透明遮罩
-                min_height="100vh",
-                width="100%",
-                padding_top="20px"
-            ),
-            ticker_bar()
-        ]
+                    if not event_markets or not isinstance(event_markets, list):
+                        continue
+
+                    # 1. 过滤与排序 (保持不变：过滤已关闭市场，按交易量排序)
+                    active_markets = []
+                    for m in event_markets:
+                        if m.get('closed') is True: continue
+                        if not m.get('outcomePrices'): continue
+                        active_markets.append(m)
+
+                    if not active_markets: continue
+
+                    active_markets.sort(key=lambda x: float(x.get('volume', 0) or 0), reverse=True)
+                    m = active_markets[0]
+
+                    # 2. 解析 Outcomes 和 Prices
+                    outcomes = m.get('outcomes')
+                    if isinstance(outcomes, str): outcomes = json.loads(outcomes)
+                        
+                    prices = m.get('outcomePrices')
+                    if isinstance(prices, str): prices = json.loads(prices)
+
+                    if not outcomes or not prices or len(prices) != len(outcomes): continue
+
+                    yes_price = 0
+                    no_price = 0
+                    
+                    # =======================================================
+                    # 🌟 核心修复逻辑
+                    # =======================================================
+                    
+                    # 场景 A: 明确的 Yes/No 市场
+                    # 必须找到 "Yes" 所在的索引位置，直接取那个价格
+                    if "Yes" in outcomes and "No" in outcomes:
+                        try:
+                            yes_index = outcomes.index("Yes")
+                            yes_raw = float(prices[yes_index])
+                            yes_price = int(yes_raw * 100)
+                            no_price = 100 - yes_price
+                        except:
+                            # 兜底：如果出错，默认取第一个
+                            yes_price = int(float(prices[0]) * 100)
+                            no_price = 100 - yes_price
+
+                    # 场景 B: 多选项市场 (如 "<250k", "250k-500k")
+                    # 这种情况下，Outcome 里没有 "Yes"，我们保持原策略：取概率最高的那个显示
+                    else:
+                        max_price = max([float(p) for p in prices])
+                        yes_price = int(max_price * 100)
+                        no_price = 100 - yes_price
+
+                    markets.append({
+                        "title": title,
+                        "yes": yes_price,
+                        "no": no_price,
+                        "slug": event.get('slug', '')
+                    })
+                except Exception:
+                    continue
+        return markets
+    except Exception:
+        return []
+
+def fetch_poly_details(slug):
+    valid_markets = []
+    try:
+        url = f"https://gamma-api.polymarket.com/events?slug={slug}"
+        resp = requests.get(url, timeout=3).json()
+        if isinstance(resp, list) and resp:
+            for m in resp[0].get('markets', [])[:2]:
+                p = normalize_data(m)
+                if p: valid_markets.append(p)
+            return valid_markets
+    except: pass
+    try:
+        url = f"https://gamma-api.polymarket.com/markets?slug={slug}"
+        resp = requests.get(url, timeout=3).json()
+        if isinstance(resp, list):
+            for m in resp:
+                p = normalize_data(m)
+                if p: valid_markets.append(p)
+        elif isinstance(resp, dict):
+            p = normalize_data(resp)
+            if p: valid_markets.append(p)
+        return valid_markets
+    except: pass
+    return []
+
+def normalize_data(m):
+    try:
+        if m.get('closed') is True: return None
+        outcomes = m.get('outcomes')
+        if isinstance(outcomes, str): outcomes = json.loads(outcomes)
+        
+        prices = m.get('outcomePrices')
+        if isinstance(prices, str): prices = json.loads(prices)
+        
+        odds_display = "N/A"
+        if outcomes and prices and len(outcomes) > 0 and len(prices) > 0:
+            odds_display = f"{outcomes[0]}: {float(prices[0])*100:.1f}%"
+            
+        return {
+            "title": m.get('question', 'Unknown'),
+            "odds": odds_display,
+            "volume": float(m.get('volume', 0)),
+            "slug": m.get('slug', '') or m.get('market_slug', '')
+        }
+    except: return None
+
+def consult_holmes(user_input, market_data):
+    if not GOOGLE_API_KEY: return "AI Key Missing."
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        lang = detect_language(user_input)
+        if lang == "CHINESE":
+            lang_instruction = "IMPORTANT: Respond in **CHINESE (中文)**."
+            role_desc = "你现在是 **Be Holmes**，一位极度理性、只相信数据和博弈论的顶级宏观对冲基金经理。"
+        else:
+            lang_instruction = "IMPORTANT: Respond in **ENGLISH**."
+            role_desc = "You are **Be Holmes**, a legendary Wall Street Macro Hedge Fund Manager. Rational, cynical, and data-driven."
+
+        market_context = ""
+        if market_data:
+            m = market_data[0]
+            market_context = f"Target: {m['title']} | Odds: {m['odds']} | Volume: ${m['volume']:,.0f}"
+        else:
+            market_context = "No specific prediction market found."
+
+        prompt = f"""
+        {role_desc}
+        [Intel]: "{user_input}"
+        [Market Data]: {market_context}
+        {lang_instruction}
+        
+        **MISSION: DECODE ALPHA.**
+        **Analysis Framework:**
+        1. **Priced-in Check**
+        2. **Bluff vs Reality**
+        3. **Verdict**
+        
+        Output as a concise professional briefing.
+        """
+        return model.generate_content(prompt).text
+    except Exception as e: return f"AI Error: {e}"
+
+# ================= 🖥️ 4. MAIN INTERFACE =================
+
+# 4.1 Hero Section
+st.markdown('<h1 class="hero-title">Be Holmes</h1>', unsafe_allow_html=True)
+st.markdown('<p class="hero-subtitle">Explore the world\'s prediction markets with neural search.</p>', unsafe_allow_html=True)
+
+# 4.2 Search Section
+_, mid, _ = st.columns([1, 6, 1])
+with mid:
+    user_news = st.text_area("Input", height=70, placeholder="Search for a market, region or event...", label_visibility="collapsed")
+
+# 4.3 Button Section
+_, btn_col, _ = st.columns([1, 2, 1])
+with btn_col:
+    ignite_btn = st.button("Decode Alpha", use_container_width=True)
+
+# 4.4 Execution Logic
+if ignite_btn:
+    if not KEYS_LOADED:
+        st.error("🔑 API Keys not found in Secrets.")
+    elif not user_news:
+        st.warning("Please enter intelligence to analyze.")
+    else:
+        with st.container():
+            st.markdown("---")
+            with st.status("Running Neural Analysis...", expanded=True) as status:
+                st.write("Mapping Semantics...")
+                matches, keyword = search_with_exa(user_news)
+                st.write("Calculating Probabilities...")
+                report = consult_holmes(user_news, matches)
+                status.update(label="Analysis Complete", state="complete", expanded=False)
+
+            if matches:
+                m = matches[0]
+                st.markdown(f"""
+                <div class="market-card">
+                    <div style="font-size:1.2rem; color:#e5e7eb; margin-bottom:10px;">{m['title']}</div>
+                    <div style="display:flex; justify-content:space-between; align-items:flex-end;">
+                        <div>
+                            <div style="font-family:'Plus Jakarta Sans'; color:#4ade80; font-size:1.8rem; font-weight:700;">{m['odds']}</div>
+                            <div style="color:#9ca3af; font-size:0.8rem;">Implied Probability</div>
+                        </div>
+                        <div style="text-align:right;">
+                            <div style="color:#e5e7eb; font-weight:600; font-size:1.2rem;">${m['volume']:,.0f}</div>
+                            <div style="color:#9ca3af; font-size:0.8rem;">Volume</div>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+            st.markdown(f"<div style='background:transparent; border-left:3px solid #dc2626; padding:15px 20px; color:#d1d5db; line-height:1.6;'>{report}</div>", unsafe_allow_html=True)
+
+# ================= 📉 5. BOTTOM SECTION: TOP 12 MARKETS =================
+
+top10_markets = fetch_top_10_markets()
+
+if top10_markets:
+    # UPDATED: Use <a> tag instead of <div> for the card wrapper
+    # Added href linking to Polymarket event page
+    cards_html = "".join([f"""
+    <a href="https://polymarket.com/event/{m['slug']}" target="_blank" class="market-item">
+        <div class="m-title" title="{m['title']}">{m['title']}</div>
+        <div class="m-odds">
+            <span class="tag-yes">Yes {m['yes']}¢</span>
+            <span class="tag-no">No {m['no']}¢</span>
+        </div>
+    </a>""" for m in top10_markets])
+
+    final_html = f"""
+    <div class="top10-container">
+        <div class="top10-header">Trending on Polymarket (Top 12)</div>
+        <div class="top10-grid">{cards_html}</div>
+    </div>
+    """
+    
+    st.markdown(final_html, unsafe_allow_html=True)
+else:
+    st.markdown("""
+    <div style="text-align:center; margin-top:50px; color:#666;">
+        Connecting to Prediction Markets...
+    </div>
+    """, unsafe_allow_html=True)
+
+# ================= 👇 6. 底部协议与说明 (PROTOCOL & MANUAL) =================
+
+st.markdown("<br><br>", unsafe_allow_html=True)
+
+# 自定义底部样式 (中心化布局版)
+st.markdown("""
+<style>
+    /* 强制 Radio 组件居中 */
+    div.row-widget.stRadio > div {
+        justify-content: center;
+    }
+
+    /* 协议文本容器 */
+    .protocol-container {
+        font-family: 'Inter', sans-serif;
+        color: #cbd5e1; /* slate-300 */
+        font-size: 0.95rem;
+        line-height: 1.8;
+        margin-top: 20px;
+        text-align: center; /* 全局居中 */
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    /* 每一个步骤的样式 - 改为居中块状风格 */
+    .protocol-step {
+        margin-bottom: 25px;
+        padding: 15px 20px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.03); /* 极淡的背景 */
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        max-width: 700px; /* 限制宽度，防止文字拉太长难看 */
+        width: 100%;
+        transition: all 0.3s;
+    }
+    .protocol-step:hover {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+    
+    /* 步骤标题 */
+    .protocol-title {
+        font-weight: 700;
+        color: #ef4444; /* 使用红色高亮标题 */
+        font-size: 1rem;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        display: block;
+        margin-bottom: 8px;
+    }
+
+    /* 底部版权区 */
+    .credits-section {
+        text-align: center;
+        margin-top: 30px;
+        padding-top: 20px;
+        border-top: 1px solid #334155;
+        color: #64748b;
+        font-size: 0.85rem;
+        font-family: monospace;
+    }
+    .credits-highlight {
+        color: #94a3b8;
+        font-weight: 600;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Expander 组件 - 纯英文标题，无 Emoji
+with st.expander("Operational Protocol & System Architecture"):
+    
+    # 语言切换开关 (CSS 已强制其居中)
+    lang_mode = st.radio(
+        "Language", 
+        ["EN", "CN"], 
+        horizontal=True, 
+        label_visibility="collapsed"
     )
+    
+    st.markdown("<br>", unsafe_allow_html=True)
 
-# ================= 🎨 CSS STYLES (Styles.css injection) =================
-# Reflex 允许直接注入 CSS
-style = """
-.ticker-wrap {
-    width: 100%;
-    overflow: hidden;
-}
-.ticker-text {
-    display: inline-block;
-    white-space: nowrap;
-    animation: ticker 120s linear infinite;
-    padding-left: 100%; 
-}
-@keyframes ticker {
-    0% { transform: translate3d(0, 0, 0); }
-    100% { transform: translate3d(-100%, 0, 0); }
-}
-"""
+    # 内容显示逻辑
+    if lang_mode == "EN":
+        st.markdown("""
+        <div class="protocol-container">
+            <div class="protocol-step">
+                <span class="protocol-title">1. Intelligence Injection (Input)</span>
+                User inputs unstructured natural language data—breaking news, social sentiment, or event-specific queries—into the system's intelligence context window.
+            </div>
+            <div class="protocol-step">
+                <span class="protocol-title">2. Neural Semantic Mapping (Processing)</span>
+                Powered by <b>Exa.ai</b>, the engine converts input semantics into high-dimensional vector embeddings to identify correlated prediction markets, bypassing rigid keyword limitations.
+            </div>
+            <div class="protocol-step">
+                <span class="protocol-title">3. Bayesian Alpha Decoding (Analysis)</span>
+                <b>Google Gemini</b> acts as the Macro-Analyst. It synthesizes market implied probabilities (Odds) with the input intelligence to calculate the "Expectation Gap"—determining if the news is priced-in or represents an alpha opportunity.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div class="protocol-container">
+            <div class="protocol-step">
+                <span class="protocol-title">1. 情报注入 (Intelligence Injection)</span>
+                用户输入非结构化自然语言数据——无论是突发新闻、社交媒体情绪还是特定事件查询，系统将自动解析其语义核心。
+            </div>
+            <div class="protocol-step">
+                <span class="protocol-title">2. 神经语义映射 (Neural Mapping)</span>
+                由 <b>Exa.ai</b> 驱动，系统将文本转化为高维向量嵌入（Embeddings），在 Polymarket 链上合约库中进行神经搜索，精准定位强相关预测市场。
+            </div>
+            <div class="protocol-step">
+                <span class="protocol-title">3. 贝叶斯阿尔法解码 (Alpha Decoding)</span>
+                <b>Google Gemini</b> 作为宏观分析引擎，综合市场隐含概率（赔率）与输入情报，计算“预期差”，判断该信息是否已被市场定价 (Priced-in) 或存在套利空间。
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-app = rx.App(style={}) # 全局样式可以在这里加
-app.add_page(index, on_load=State.on_load) # 加载时触发数据获取
+    # 底部版权 (Credits)
+    st.markdown("""
+    <div class="credits-section">
+        SYSTEM ARCHITECTURE POWERED BY<br>
+        <span class="credits-highlight">Exa.ai (Neural Search)</span> & 
+        <span class="credits-highlight">Google Gemini (Cognitive Core)</span><br><br>
+        Data Stream: Polymarket Gamma API
+    </div>
+    """, unsafe_allow_html=True)
+
+
+
+
+
+
+
+
+
+
+
+
