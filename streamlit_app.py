@@ -605,7 +605,7 @@ with mid:
                 # 显示一个看起来像按钮的链接
                 st.markdown(f"""
                 <div style="text-align: center; margin-top: 20px;">
-                    <a href="{auth_resp.url}" target="_self">
+                    <a href="{auth_resp.url}" target="_blank">
                         Login with Google to Decode Alpha
                     </a>
                 </div>
