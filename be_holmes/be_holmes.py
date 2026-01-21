@@ -350,9 +350,11 @@ def ticker_bar():
 
 # ================= 🚀 MAIN PAGE LAYOUT (FIXED) =================
 
+# ================= 🚀 MAIN PAGE LAYOUT (FIXED) =================
+
 def index():
     return rx.box(
-        # 1. 第一个子元素：遮罩层内容容器
+        # 1. 第一个直接子元素：遮罩层
         rx.box(
             rx.vstack(
                 hero_section(),
@@ -373,7 +375,7 @@ def index():
             padding_top="20px"
         ),
         
-        # 2. 第二个子元素：底部滚动条
+        # 2. 第二个直接子元素：底部滚动条
         ticker_bar(),
 
         # 3. 这里的参数是 rx.box 自己的样式 (Props)
