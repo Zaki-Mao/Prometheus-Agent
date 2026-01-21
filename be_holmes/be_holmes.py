@@ -348,43 +348,41 @@ def ticker_bar():
         white_space="nowrap"
     )
 
-# ================= 🚀 MAIN PAGE LAYOUT =================
+# ================= 🚀 MAIN PAGE LAYOUT (FIXED) =================
 
 def index():
     return rx.box(
-        # 背景图设置
+        # 1. 第一个子元素：遮罩层内容容器
+        rx.box(
+            rx.vstack(
+                hero_section(),
+                search_section(),
+                result_card(),
+                analysis_report(),
+                market_grid(),
+                # 底部留白给 Ticker
+                rx.box(height="100px"),
+                
+                align="center",
+                width="100%",
+                padding_bottom="50px"
+            ),
+            bg="rgba(0, 0, 0, 0.8)", # 黑色半透明遮罩
+            min_height="100vh",
+            width="100%",
+            padding_top="20px"
+        ),
+        
+        # 2. 第二个子元素：底部滚动条
+        ticker_bar(),
+
+        # 3. 这里的参数是 rx.box 自己的样式 (Props)
         bg_image="url('https://upload.cc/i1/2026/01/20/s8pvXA.jpg')",
         bg_size="cover",
         bg_position="center",
         bg_attachment="fixed",
-        min_height="100vh",
-        
-        # 内容容器
-        children=[
-            # 这里的 Box 充当遮罩层 (Overlay) 实现变暗效果
-            rx.box(
-                rx.vstack(
-                    hero_section(),
-                    search_section(),
-                    result_card(),
-                    analysis_report(),
-                    market_grid(),
-                    # 底部留白给 Ticker
-                    rx.box(height="100px"),
-                    
-                    align="center",
-                    width="100%",
-                    padding_bottom="50px"
-                ),
-                bg="rgba(0, 0, 0, 0.8)", # 黑色半透明遮罩
-                min_height="100vh",
-                width="100%",
-                padding_top="20px"
-            ),
-            ticker_bar()
-        ]
+        min_height="100vh"
     )
-
 # ================= 🎨 CSS STYLES (Styles.css injection) =================
 # Reflex 允许直接注入 CSS
 style = """
