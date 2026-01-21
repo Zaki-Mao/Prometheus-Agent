@@ -9,7 +9,7 @@ config = rx.Config(
     
     # 2. 告诉前端去哪里找后端 (解决 502/连接失败)
     # 生产环境下，API 地址就是你的域名本身
-    api_url="https://beholmes.zeabur.app",
+    api_url="https://beholmes-backend.zeabur.app",
     
     # 3. 部署相关配置
     deploy_url="https://beholmes.zeabur.app",
