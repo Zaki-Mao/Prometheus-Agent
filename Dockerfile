@@ -23,5 +23,6 @@ RUN reflex export --frontend-only --no-zip
 EXPOSE 3000
 EXPOSE 8000
 
+
 # 启动命令
 CMD ["sh", "-c", "reflex run --env prod --backend-only & python3 -m http.server 3000 --directory .web/build/client"]
