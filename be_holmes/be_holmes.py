@@ -65,7 +65,6 @@ class State(rx.State):
             # 简化搜索逻辑，确保稳定性
             exa = Exa(EXA_API_KEY)
             resp = exa.search(f"prediction market {query}", num_results=2, include_domains=["polymarket.com"])
-            # 这里省略复杂的解析，只要确保流程通畅
             return [], query 
         except Exception as e: 
             print(f"Exa Error: {e}")
@@ -85,10 +84,9 @@ class State(rx.State):
             print("⚡ 发起 Polymarket API 请求...")
             url = "https://gamma-api.polymarket.com/events?limit=12&sort=volume&closed=false"
             
-            # 设置 10 秒超时，防止无限卡顿
+            # 设置 10 秒超时
             resp = requests.get(url, headers=self._headers, timeout=10)
             
-            # 如果状态码不是 200，直接抛出异常，不要 Swallow
             if resp.status_code != 200:
                 raise Exception(f"HTTP {resp.status_code}: {resp.text[:50]}")
             
@@ -122,7 +120,7 @@ class State(rx.State):
             print(f"✅ 成功加载 {len(markets)} 个市场")
 
         except Exception as e:
-            # 🚨 关键：把错误直接写在页面底部，而不是藏在日志里
+            # 🚨 关键：错误上墙
             error_msg = str(e)
             print(f"❌ 严重错误: {error_msg}")
             if "403" in error_msg:
@@ -135,6 +133,7 @@ class State(rx.State):
 # ================= 🎨 UI COMPONENTS =================
 def index():
     return rx.box(
+        # 1. 核心内容区 (Positional Argument)
         rx.vstack(
             rx.heading("Be Holmes", size="9", color="white", letter_spacing="-2px", padding_top="8vh"),
             rx.text("Global Prediction Market Intelligence", color="#9ca3af", margin_bottom="30px"),
@@ -166,10 +165,12 @@ def index():
             ),
             align="center", padding_bottom="100px", width="100%"
         ),
-        bg="#0f172a", min_height="100vh", padding_x="20px",
         
-        # 底部滚动条 - 这里会显示具体的错误信息
-        rx.box(rx.text(State.ticker_text, color="white", font_weight="bold"), position="fixed", bottom="0", width="100%", bg="black", padding="10px", border_top="1px solid red")
+        # 2. 底部滚动条 (Positional Argument - 修正位置，放在样式参数之前)
+        rx.box(rx.text(State.ticker_text, color="white", font_weight="bold"), position="fixed", bottom="0", width="100%", bg="black", padding="10px", border_top="1px solid red"),
+
+        # 3. 样式参数 (Keyword Arguments - 必须放在最后)
+        bg="#0f172a", min_height="100vh", padding_x="20px"
     )
 
 app = rx.App()
