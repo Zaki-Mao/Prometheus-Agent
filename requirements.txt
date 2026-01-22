@@ -1,5 +1,4 @@
-reflex>=0.7.0  
-google-generativeai
-exa-py
 requests
-
+google-generativeai
+pandas
+exa_py
