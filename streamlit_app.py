@@ -77,7 +77,7 @@ st.markdown("""
     [data-testid="stToolbar"] { visibility: hidden; }
     [data-testid="stDecoration"] { visibility: hidden; }
 
-    /* Hero Title */
+    /* Hero Title - CSS定义保持，但在HTML中我们会动态控制内容 */
     .hero-title {
         font-family: 'Inter', sans-serif;
         font-weight: 700;
@@ -88,6 +88,7 @@ st.markdown("""
         margin-bottom: 5px;
         padding-top: 8vh;
         text-shadow: 0 0 20px rgba(0,0,0,0.5);
+        cursor: default; /* 鼠标放上去不显示输入光标 */
     }
     
     .hero-subtitle {
@@ -97,6 +98,7 @@ st.markdown("""
         text-align: center;
         margin-bottom: 50px;
         font-weight: 400;
+        min-height: 1.5em; /* 防止文字跳动导致高度塌陷 */
     }
 
     /* 4. Input Field Styling */
@@ -1107,9 +1109,64 @@ def analyze_directly(user_query):
 
 # ================= 🖥️ 4. MAIN INTERFACE =================
 
-# 4.1 Hero Section
-st.markdown('<h1 class="hero-title">Be Holmes</h1>', unsafe_allow_html=True)
-st.markdown('<p class="hero-subtitle">Expert news analysis & prediction market intelligence</p>', unsafe_allow_html=True)
+# 4.1 Hero Section with Decryption Animation
+st.markdown("""
+<div style="text-align: center; padding-top: 8vh;">
+    <h1 class="hero-title" id="decrypt-title" data-value="Be Holmes">Be Holmes</h1>
+    <p class="hero-subtitle" id="decrypt-subtitle" data-value="Expert news analysis & prediction market intelligence">Expert news analysis & prediction market intelligence</p>
+</div>
+
+<script>
+    const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+
+    function startLoader(element) {
+        const originalText = element.dataset.value;
+        let iteration = 0;
+        let interval = null;
+        
+        clearInterval(interval);
+        
+        interval = setInterval(() => {
+            element.innerText = originalText
+                .split("")
+                .map((letter, index) => {
+                    if(index < iteration) {
+                        return originalText[index];
+                    }
+                    return letters[Math.floor(Math.random() * letters.length)];
+                })
+                .join("");
+            
+            if(iteration >= originalText.length) { 
+                clearInterval(interval);
+            }
+            
+            iteration += 1 / 3;
+        }, 30);
+    }
+
+    // Attempt to start animation when elements are available
+    // Using a simple polling mechanism to ensure elements exist since Streamlit dynamically loads
+    const checkElements = setInterval(() => {
+        const title = document.getElementById("decrypt-title");
+        const subtitle = document.getElementById("decrypt-subtitle");
+        
+        if(title && subtitle) {
+            clearInterval(checkElements);
+            
+            // Start animations
+            startLoader(title);
+            setTimeout(() => startLoader(subtitle), 500);
+            
+            // Add hover effect
+            title.onmouseover = event => startLoader(event.target);
+        }
+    }, 100);
+    
+    // Safety clear interval after 5 seconds to prevent infinite polling
+    setTimeout(() => clearInterval(checkElements), 5000);
+</script>
+""", unsafe_allow_html=True)
 
 # 4.2 Search Section
 _, mid, _ = st.columns([1, 6, 1])
