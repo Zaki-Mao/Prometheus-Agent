@@ -123,8 +123,10 @@ st.markdown("""
     }
     .m-title { color: #e5e7eb; font-size: 0.95rem; font-weight: 500; margin-bottom: 12px; line-height: 1.4; }
     .m-odds { display: flex; gap: 8px; font-size: 0.75rem; margin-top: auto; }
-    .tag-yes { background: rgba(6, 78, 59, 0.4); color: #4ade80; padding: 2px 8px; border-radius: 4px; }
-    .tag-no { background: rgba(127, 29, 29, 0.4); color: #f87171; padding: 2px 8px; border-radius: 4px; }
+    
+    /* 赔率标签样式优化 */
+    .tag-yes { background: rgba(6, 78, 59, 0.4); color: #4ade80; padding: 2px 8px; border-radius: 4px; font-weight: bold;}
+    .tag-no { background: rgba(127, 29, 29, 0.4); color: #f87171; padding: 2px 8px; border-radius: 4px; font-weight: bold;}
     
     /* Input & Button */
     .stTextArea textarea {
@@ -180,22 +182,52 @@ def fetch_poly_details(slug):
         resp = requests.get(url, timeout=3).json()
         valid = []
         if isinstance(resp, list) and resp:
-            for m in resp[0].get('markets', [])[:2]:
+            # 详情页我们也只取第一个市场，逻辑和 Top 10 保持一致
+            for m in resp[0].get('markets', [])[:1]: 
                 p = normalize_data(m)
                 if p: valid.append(p)
         return valid
     except: return []
 
+# ⚡️ 核心修复：更智能的数据标准化逻辑
 def normalize_data(m):
     try:
         if m.get('closed') is True: return None
+        
+        # 解析 Outcome 和 Prices
         outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
         prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
-        odds = "N/A"
-        if outcomes and prices: odds = f"{outcomes[0]}: {float(prices[0])*100:.1f}%"
-        return {"title": m.get('question'), "odds": odds, "volume": float(m.get('volume', 0)), "slug": m.get('slug', '')}
+        
+        if not outcomes or not prices: return None
+
+        # 逻辑：如果是 Yes/No 市场，找 Yes。如果是多选项，找最高概率的那个。
+        main_price = 0
+        display_label = ""
+        
+        if "Yes" in outcomes:
+            idx = outcomes.index("Yes")
+            main_price = float(prices[idx])
+            display_label = f"Yes: {main_price*100:.1f}%"
+        else:
+            # 找不到 Yes，就找概率最大的那个（The Favorite）
+            float_prices = [float(p) for p in prices]
+            max_price = max(float_prices)
+            main_price = max_price
+            
+            # 找到最大概率对应的选项名字
+            max_idx = float_prices.index(max_price)
+            top_outcome_name = outcomes[max_idx]
+            display_label = f"{top_outcome_name}: {main_price*100:.1f}%"
+
+        return {
+            "title": m.get('question'), 
+            "odds": display_label, 
+            "volume": float(m.get('volume', 0)), 
+            "slug": m.get('slug', '')
+        }
     except: return None
 
+# ⚡️ 核心修复：Top 10 数据获取逻辑
 @st.cache_data(ttl=60)
 def fetch_top_10_markets():
     try:
@@ -206,10 +238,32 @@ def fetch_top_10_markets():
             for event in resp:
                 try:
                     m = event.get('markets', [])[0]
+                    
                     outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
                     prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
-                    yes = int(float(prices[outcomes.index("Yes")]) * 100) if "Yes" in outcomes else 50
-                    markets.append({"title": event.get('title'), "yes": yes, "no": 100-yes, "slug": event.get('slug')})
+                    
+                    if not outcomes or not prices: continue
+
+                    # 🌟 修复点：不再傻傻只找 Yes
+                    yes_price = 0
+                    
+                    if "Yes" in outcomes:
+                        # 情况1：标准的 Yes/No 市场
+                        idx = outcomes.index("Yes")
+                        yes_price = int(float(prices[idx]) * 100)
+                    else:
+                        # 情况2：多选项市场（如大选），取概率最高的那个作为 "Yes" (代表 Favorite)
+                        # 虽然显示上写 Yes/No，但逻辑上是 "Top Option" vs "Rest"
+                        float_prices = [float(p) for p in prices]
+                        max_p = max(float_prices)
+                        yes_price = int(max_p * 100)
+
+                    markets.append({
+                        "title": event.get('title'), 
+                        "yes": yes_price, 
+                        "no": 100-yes_price, 
+                        "slug": event.get('slug')
+                    })
                 except: continue
         return markets
     except: return []
@@ -260,7 +314,7 @@ def stream_holmes_response(messages, market_data=None):
 
 st.markdown('<h1 class="hero-title">Be Holmes</h1>', unsafe_allow_html=True)
 
-# 搜索框 (总是显示，作为重置入口)
+# 搜索框
 _, mid, _ = st.columns([1, 6, 1])
 with mid:
     user_input = st.text_area("Input", height=70, placeholder="Search for a market (e.g., 'Will Trump win?')...", label_visibility="collapsed", key="main_search")
@@ -271,7 +325,6 @@ with btn_col:
         if not user_input:
             st.warning("Enter a topic first.")
         else:
-            # 重置并开启新对话
             st.session_state.messages = [] 
             st.session_state.first_visit = False
             
@@ -283,7 +336,6 @@ with btn_col:
             else:
                 st.session_state.current_market = None
             
-            # 存入历史并生成回复
             st.session_state.messages.append({"role": "user", "content": f"Analyze: {user_input}"})
             with st.spinner("Decoding Alpha..."):
                 response = stream_holmes_response(st.session_state.messages, st.session_state.current_market)
@@ -292,11 +344,10 @@ with btn_col:
 
 # ================= 🗣️ 6. CHAT & CONTENT AREA =================
 
-# A. 如果有对话，显示聊天界面
+# A. 聊天界面
 if st.session_state.messages:
     st.markdown("---")
     
-    # 📌 1. 顶部钉住的市场卡片 (Context Anchor)
     if st.session_state.current_market:
         m = st.session_state.current_market
         st.markdown(f"""
@@ -308,20 +359,18 @@ if st.session_state.messages:
         </div>
         """, unsafe_allow_html=True)
 
-    # 💬 2. 聊天记录
     for i, msg in enumerate(st.session_state.messages):
         if i == 0: continue 
         with st.chat_message(msg["role"], avatar="🕵️‍♂️" if msg["role"] == "assistant" else "👤"):
             if i == 1: st.markdown(f"<div style='border-left:3px solid #dc2626; padding-left:15px;'>{msg['content']}</div>", unsafe_allow_html=True)
             else: st.write(msg["content"])
 
-    # 🎤 3. 追问输入框 (支持搜索意图识别)
     if prompt := st.chat_input("Ask follow-up or search new topic..."):
         with st.chat_message("user", avatar="👤"):
             st.write(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
         
-        # --- 🕵️‍♂️ Agent 核心：意图路由 ---
+        # Agent 意图判断
         is_search = check_search_intent(prompt)
         
         if is_search:
@@ -333,28 +382,29 @@ if st.session_state.messages:
                 if matches:
                     st.session_state.current_market = matches[0]
                     st.success(f"Found: {matches[0]['title']}")
-                    # 搜索完，必须让页面重绘，更新顶部的卡片
                     time.sleep(1) 
                     st.rerun()
                 else:
                     st.warning("No specific market found. Proceeding with general analysis.")
         
-        # 生成回复
         with st.chat_message("assistant", avatar="🕵️‍♂️"):
             with st.spinner("Thinking..."):
                 response = stream_holmes_response(st.session_state.messages, st.session_state.current_market)
                 st.write(response)
         st.session_state.messages.append({"role": "assistant", "content": response})
 
-# B. 如果没有对话 (First Visit)，显示 Top 12 榜单
-# ✅ 修复：Top 12 回归！
+# B. Top 12 榜单
 else:
     top10_markets = fetch_top_10_markets()
     if top10_markets:
+        # 为了美观，我们把标签稍微改一下，让用户知道 Yes 代表最高概率选项
         cards_html = "".join([f"""
         <a href="https://polymarket.com/event/{m['slug']}" target="_blank" class="market-item">
             <div class="m-title">{m['title']}</div>
-            <div class="m-odds"><span class="tag-yes">Yes {m['yes']}¢</span><span class="tag-no">No {m['no']}¢</span></div>
+            <div class="m-odds">
+                <span class="tag-yes">Top {m['yes']}%</span>
+                <span class="tag-no">Other {m['no']}%</span>
+            </div>
         </a>""" for m in top10_markets])
 
         st.markdown(f"""
