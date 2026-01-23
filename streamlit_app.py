@@ -46,6 +46,12 @@ if "last_search_query" not in st.session_state:
     st.session_state.last_search_query = ""
 if "chat_history_context" not in st.session_state:
     st.session_state.chat_history_context = []
+if "search_results" not in st.session_state:
+    st.session_state.search_results = []  # 存储搜索结果列表
+if "show_market_selection" not in st.session_state:
+    st.session_state.show_market_selection = False  # 是否显示市场选择界面
+if "selected_market_index" not in st.session_state:
+    st.session_state.selected_market_index = -1  # 用户选择的市场索引
 
 # ================= 🎨 2. UI THEME (保持原版不动) =================
 st.markdown("""
@@ -154,6 +160,45 @@ st.markdown("""
         backdrop-filter: blur(8px);
         box-shadow: 0 4px 20px rgba(0,0,0,0.3);
     }
+    
+    /* Market Selection Card */
+    .market-selection-card {
+        background: rgba(17, 24, 39, 0.7);
+        border: 1px solid #374151;
+        border-radius: 10px;
+        padding: 15px;
+        margin: 10px 0;
+        transition: all 0.3s ease;
+        backdrop-filter: blur(5px);
+    }
+    
+    .market-selection-card:hover {
+        border-color: #ef4444;
+        background: rgba(31, 41, 55, 0.9);
+        transform: translateY(-2px);
+    }
+    
+    .market-selection-card.selected {
+        border: 2px solid #ef4444;
+        background: rgba(31, 41, 55, 0.95);
+        box-shadow: 0 0 15px rgba(239, 68, 68, 0.3);
+    }
+    
+    .select-market-btn {
+        background: linear-gradient(90deg, #7f1d1d 0%, #dc2626 100%) !important;
+        color: white !important;
+        border: none !important;
+        padding: 8px 20px !important;
+        border-radius: 6px !important;
+        font-size: 0.9rem !important;
+        font-weight: 600 !important;
+        transition: all 0.3s !important;
+    }
+    
+    .select-market-btn:hover {
+        transform: scale(1.05) !important;
+        box-shadow: 0 0 10px rgba(220, 38, 38, 0.5) !important;
+    }
 
     /* Top 12 Grid Styles */
     .top10-container {
@@ -219,6 +264,17 @@ st.markdown("""
         border-radius: 12px;
         margin-bottom: 10px;
     }
+    
+    /* Market Selection Container */
+    .selection-container {
+        background: rgba(17, 24, 39, 0.6);
+        border: 1px solid #374151;
+        border-radius: 12px;
+        padding: 25px;
+        margin: 30px auto;
+        max-width: 900px;
+        backdrop-filter: blur(8px);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -254,36 +310,32 @@ def generate_english_keywords(user_text):
         return cleaned[:50]
 
 def search_with_exa(query, use_enhanced=True):
-    """增强版搜索，支持对话上下文"""
+    """搜索相关市场，返回所有匹配结果"""
     if not EXA_AVAILABLE or not EXA_API_KEY: 
         return [], query
     
-    # 如果查询很短（可能是追问），尝试结合历史上下文
     search_query = generate_english_keywords(query)
-    
-    # 对于简短的追问，可以结合之前的搜索词
-    if len(query.split()) < 3 and st.session_state.last_search_query:
-        search_query = f"{st.session_state.last_search_query} {search_query}"
     
     markets_found, seen_ids = [], set()
     try:
         exa = Exa(EXA_API_KEY)
         
-        # 尝试不同的搜索策略
+        # 使用多种搜索策略获取更多结果
         search_strategies = [
             f"prediction market about {search_query}",
-            f"Polymarket {search_query}",
-            f"{search_query} market odds"
+            f"Polymarket {search_query} odds",
+            f"{search_query} prediction market",
+            f"market predictions {search_query}"
         ]
         
         for strategy in search_strategies:
-            if len(markets_found) >= 3:  # 找到足够结果就停止
+            if len(markets_found) >= 10:  # 最多收集10个结果
                 break
                 
             try:
                 search_response = exa.search(
                     strategy,
-                    num_results=10, 
+                    num_results=15, 
                     type="neural", 
                     include_domains=["polymarket.com"]
                 )
@@ -296,7 +348,25 @@ def search_with_exa(query, use_enhanced=True):
                         if slug not in ['profile', 'login', 'leaderboard', 'rewards', 'orders', 'activity'] and slug not in seen_ids:
                             market_data = fetch_poly_details(slug)
                             if market_data:
-                                markets_found.extend(market_data)
+                                for market in market_data:
+                                    # 计算相关性得分（简单版：基于标题长度和是否有价格）
+                                    relevance_score = 0
+                                    title = market.get('title', '').lower()
+                                    query_terms = query.lower().split()
+                                    
+                                    # 标题包含查询词的越多，相关性越高
+                                    for term in query_terms:
+                                        if term in title:
+                                            relevance_score += 1
+                                    
+                                    # 确保有价格信息
+                                    if market.get('odds'):
+                                        relevance_score += 2
+                                    
+                                    # 添加相关性得分到市场数据
+                                    market['relevance_score'] = relevance_score
+                                    markets_found.append(market)
+                                    
                                 seen_ids.add(slug)
                                 
             except Exception as e:
@@ -306,7 +376,20 @@ def search_with_exa(query, use_enhanced=True):
     except Exception as e: 
         print(f"Search error: {e}")
     
-    return markets_found, search_query
+    # 按相关性排序并去重（基于标题）
+    unique_markets = []
+    seen_titles = set()
+    
+    for market in sorted(markets_found, key=lambda x: x.get('relevance_score', 0), reverse=True):
+        title = market.get('title', '').strip()
+        if title and title not in seen_titles and len(title) > 10:  # 确保标题合理
+            unique_markets.append(market)
+            seen_titles.add(title)
+            
+            if len(unique_markets) >= 8:  # 最多显示8个
+                break
+    
+    return unique_markets, search_query
 
 @st.cache_data(ttl=60)
 def fetch_top_10_markets():
@@ -430,9 +513,7 @@ safety_config = {
 }
 
 def check_search_intent(user_text, current_market=None):
-    """
-    更精准的意图判断，区分追问和新搜索
-    """
+    """判断用户是否想要搜索新主题"""
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         
@@ -475,7 +556,7 @@ def check_search_intent(user_text, current_market=None):
         resp = model.generate_content(prompt, safety_settings=safety_config)
         result = resp.text.strip().upper()
         
-        # 安全回退：如果结果不明确，使用简单规则
+        # 安全回退
         if "YES" in result:
             return True
         elif "NO" in result:
@@ -485,56 +566,68 @@ def check_search_intent(user_text, current_market=None):
             search_triggers = ["search", "find", "look for", "show me", "new", "different"]
             if any(trigger in user_text.lower() for trigger in search_triggers):
                 return True
-            # 如果当前有市场且用户输入很短，很可能是追问
             if current_market and len(user_text.split()) <= 3:
                 return False
             return False
             
     except Exception as e:
         print(f"Intent check error: {e}")
-        # 出错时保守策略：不触发新搜索
         return False
 
-def stream_chat_response(messages, market_data=None):
+def stream_chat_response(messages, market_data=None, user_query=""):
+    """生成分析响应"""
     model = genai.GenerativeModel('gemini-2.5-flash')
     
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
     
-    # 构建对话历史上下文（最后3条消息）
+    # 构建对话历史上下文
     recent_history = "\n".join([
         f"{'User' if msg['role']=='user' else 'Assistant'}: {msg['content'][:100]}..."
         for msg in messages[-3:]
-    ])
+    ]) if len(messages) > 0 else "No previous conversation."
     
     market_context = ""
     if market_data:
         market_context = f"""
-        RELEVANT MARKET DATA:
-        - Event: "{market_data['title']}"
+        SELECTED MARKET DATA:
+        - Event/Question: "{market_data['title']}"
         - Current Odds: {market_data['odds']}
-        - Volume: ${market_data['volume']:,.0f}
+        - Trading Volume: ${market_data['volume']:,.0f}
+        - Market URL: https://polymarket.com/event/{market_data['slug']}
         """
-    else:
-        market_context = "Note: No specific market data found for this query."
+    
+    # 获取用户原始查询（如果有）
+    user_intel = user_query if user_query else "the provided intelligence"
     
     system_prompt = f"""
-    You are Be Holmes, a cynical but rational Macro Hedge Fund Manager.
+    You are Be Holmes, a cynical but rational Macro Hedge Fund Manager specializing in prediction markets.
     Current Date: {current_date}
+    
+    USER'S INTELLIGENCE/QUERY: {user_intel}
+    
+    {market_context}
     
     RECENT CONVERSATION:
     {recent_history}
     
-    {market_context}
+    ANALYSIS FRAMEWORK:
+    1. **Market Context**: Explain what this prediction market is about
+    2. **Current Sentiment**: Analyze the current odds and what they imply
+    3. **News Impact**: How does the user's intelligence/news affect this market?
+    4. **Market Inefficiencies**: Identify any mispricings or opportunities
+    5. **Risk Assessment**: What are the key risks?
+    6. **Trading Recommendation**: Clear buy/sell/hold recommendation with reasoning
     
-    RESPONSE GUIDELINES:
-    1. If market data is relevant to the query, analyze it directly
-    2. If market data is irrelevant, acknowledge it and provide general analysis
-    3. Maintain consistent persona: data-driven, skeptical, professional
-    4. Automatically match the user's language (Chinese/English)
-    5. For follow-up questions, maintain continuity with previous discussion
-    6. Provide actionable insights and specific recommendations when possible
+    CRITICAL REQUIREMENTS:
+    - Be data-driven and quantitative where possible
+    - Maintain a skeptical, contrarian mindset
+    - Provide specific probability estimates if relevant
+    - Suggest position sizing if making a recommendation
+    - Highlight both upside and downside scenarios
+    - Match the user's language (Chinese/English)
     
-    Always end with a clear stance or recommendation if appropriate.
+    FORMAT:
+    Start with a brief executive summary, then detailed analysis.
     """
     
     history = [{"role": "user", "parts": [system_prompt]}]
@@ -550,6 +643,31 @@ def stream_chat_response(messages, market_data=None):
     except Exception as e:
         return f"⚠️ Error: {str(e)}"
 
+def analyze_selected_market(market_index, user_query):
+    """分析用户选择的市场"""
+    if 0 <= market_index < len(st.session_state.search_results):
+        selected_market = st.session_state.search_results[market_index]
+        st.session_state.current_market = selected_market
+        st.session_state.selected_market_index = market_index
+        
+        # 重置消息历史，开始新的分析对话
+        st.session_state.messages = []
+        st.session_state.messages.append({"role": "user", "content": f"Analyze this intel in relation to the selected market: {user_query}"})
+        
+        # 生成分析
+        with st.spinner("🧠 Decoding Alpha..."):
+            response = stream_chat_response(
+                st.session_state.messages, 
+                selected_market,
+                user_query
+            )
+            st.session_state.messages.append({"role": "assistant", "content": response})
+        
+        # 关闭市场选择界面
+        st.session_state.show_market_selection = False
+        return True
+    return False
+
 # ================= 🖥️ 4. MAIN INTERFACE =================
 
 # 4.1 Hero Section
@@ -559,53 +677,102 @@ st.markdown('<p class="hero-subtitle">Explore the world\'s prediction markets wi
 # 4.2 Search Section
 _, mid, _ = st.columns([1, 6, 1])
 with mid:
-    user_news = st.text_area("Input", height=70, placeholder="Search for a market, region or event...", label_visibility="collapsed", key="main_search_input")
+    user_news = st.text_area("Input", height=70, placeholder="Enter news, event, or intelligence to analyze...", label_visibility="collapsed", key="main_search_input")
 
 # 4.3 Button Section
 _, btn_col, _ = st.columns([1, 2, 1])
 with btn_col:
-    ignite_btn = st.button("Decode Alpha", use_container_width=True)
+    ignite_btn = st.button("Search Markets", use_container_width=True)
 
-# 4.4 触发逻辑
+# 4.4 触发搜索逻辑
 if ignite_btn:
     if not KEYS_LOADED:
         st.error("🔑 API Keys not found in Secrets.")
     elif not user_news:
         st.warning("Please enter intelligence to analyze.")
     else:
+        # 重置状态
         st.session_state.messages = []
         st.session_state.current_market = None
-        st.session_state.first_visit = False
+        st.session_state.selected_market_index = -1
         
-        with st.spinner("Neural Searching..."):
+        with st.spinner("🔍 Neural Searching Polymarket..."):
             matches, keyword = search_with_exa(user_news)
         
-        # 保存搜索查询
+        # 保存搜索查询和结果
         st.session_state.last_search_query = keyword
+        st.session_state.search_results = matches
         
         if matches:
-            st.session_state.current_market = matches[0]
+            # 显示市场选择界面
+            st.session_state.show_market_selection = True
+            st.rerun()
         else:
-            st.session_state.current_market = None
-            
-        st.session_state.messages.append({"role": "user", "content": f"Analyze this intel: {user_news}"})
-        
-        with st.spinner("Decoding Alpha..."):
-            response = stream_chat_response(st.session_state.messages, st.session_state.current_market)
-            st.session_state.messages.append({"role": "assistant", "content": response})
-        
-        st.rerun()
+            st.error("❌ No relevant prediction markets found. Try a different query.")
+            st.session_state.show_market_selection = False
 
-# ================= 🗣️ 5. CHAT INTERFACE =================
+# ================= 🗳️ 5. MARKET SELECTION INTERFACE =================
 
-if st.session_state.messages:
+if st.session_state.show_market_selection and st.session_state.search_results:
     st.markdown("---")
     
+    st.markdown(f"""
+    <div class="selection-container">
+        <h3 style="color: #e5e7eb; margin-bottom: 5px;">📊 Found {len(st.session_state.search_results)} Relevant Markets</h3>
+        <p style="color: #9ca3af; margin-bottom: 25px;">Select a market to analyze with your intelligence:</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 显示市场列表
+    for idx, market in enumerate(st.session_state.search_results):
+        # 创建列：左侧市场信息，右侧选择按钮
+        col1, col2 = st.columns([4, 1])
+        
+        with col1:
+            # 市场卡片
+            is_selected = (st.session_state.selected_market_index == idx)
+            card_class = "market-selection-card selected" if is_selected else "market-selection-card"
+            
+            st.markdown(f"""
+            <div class="{card_class}">
+                <div style="font-size: 1.1rem; color: #e5e7eb; font-weight: 500; margin-bottom: 8px;">
+                    {market['title']}
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <span style="color: #4ade80; font-weight: 600;">{market['odds']}</span>
+                        <span style="color: #9ca3af; margin-left: 15px;">Volume: ${market['volume']:,.0f}</span>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            # 选择按钮
+            if st.button(f"Select", key=f"select_{idx}", use_container_width=True):
+                analyze_selected_market(idx, user_news)
+                st.rerun()
+    
+    # 如果没有找到想要的市场
+    st.markdown("""
+    <div style="text-align: center; margin-top: 30px; padding: 20px; background: rgba(255,255,255,0.03); border-radius: 10px;">
+        <p style="color: #9ca3af; margin-bottom: 10px;">Don't see the market you're looking for?</p>
+        <p style="color: #ef4444; font-size: 0.9rem;">Try refining your search query or check the trending markets below.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+# ================= 🗣️ 6. CHAT INTERFACE =================
+
+# 只有在用户选择了市场后才显示聊天界面
+if not st.session_state.show_market_selection and st.session_state.messages:
+    st.markdown("---")
+    
+    # 显示当前选择的市场卡片
     if st.session_state.current_market:
         m = st.session_state.current_market
         st.markdown(f"""
         <div class="market-card">
-            <div style="font-size:0.9rem; color:#9ca3af; margin-bottom:5px;">TARGET MARKET</div>
+            <div style="font-size:0.9rem; color:#9ca3af; margin-bottom:5px;">SELECTED MARKET</div>
             <div style="font-size:1.2rem; color:#e5e7eb; margin-bottom:10px; font-weight:bold;">{m['title']}</div>
             <div style="display:flex; justify-content:space-between; align-items:flex-end;">
                 <div>
@@ -617,18 +784,12 @@ if st.session_state.messages:
                     <div style="color:#9ca3af; font-size:0.8rem;">Volume</div>
                 </div>
             </div>
-             <div style="margin-top:10px; padding-top:10px; border-top:1px solid #374151; font-size:0.8rem; text-align:right;">
+            <div style="margin-top:10px; padding-top:10px; border-top:1px solid #374151; font-size:0.8rem; text-align:right;">
                 <a href="https://polymarket.com/event/{m['slug']}" target="_blank" style="color:#ef4444; text-decoration:none;">View on Polymarket ↗</a>
             </div>
         </div>
         """, unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <div style="text-align:center; padding:10px; color:#9ca3af; font-size:0.9rem; background:rgba(255,255,255,0.05); border-radius:8px; margin-bottom:20px;">
-            ⚠️ No specific market found. Analyzing based on general intelligence.
-        </div>
-        """, unsafe_allow_html=True)
-
+    
     # 显示消息历史
     for i, msg in enumerate(st.session_state.messages):
         if i == 0: continue 
@@ -640,7 +801,7 @@ if st.session_state.messages:
                 st.write(msg["content"])
 
     # 聊天输入
-    if prompt := st.chat_input("Ask a follow-up or search for a new topic..."):
+    if prompt := st.chat_input("Ask a follow-up question or search for a new topic..."):
         # 添加用户消息
         with st.chat_message("user", avatar="👤"):
             st.write(prompt)
@@ -650,46 +811,42 @@ if st.session_state.messages:
         is_search = check_search_intent(prompt, st.session_state.current_market)
         
         if is_search:
-            # 新搜索逻辑
+            # 新搜索逻辑 - 直接回到搜索流程
+            st.session_state.show_market_selection = False
+            st.session_state.current_market = None
+            st.session_state.messages = []
+            
             with st.chat_message("assistant", avatar="🕵️‍♂️"):
-                status_message = st.empty()
-                status_message.markdown("🔍 **Searching for relevant prediction markets...**")
+                st.write(f"🔍 Searching for new markets related to: **{prompt}**")
                 
                 with st.spinner("Scanning Polymarket..."):
                     matches, keyword = search_with_exa(prompt)
                 
                 if matches:
-                    st.session_state.current_market = matches[0]
+                    st.session_state.search_results = matches
                     st.session_state.last_search_query = keyword
-                    status_message.markdown(f"✅ **Found market:** *{matches[0]['title']}*")
-                    
-                    # 短暂延迟后生成分析
-                    time.sleep(1)
-                    with st.spinner("Analyzing new market..."):
-                        response = stream_chat_response(st.session_state.messages, st.session_state.current_market)
-                        st.write(response)
-                    
+                    st.session_state.show_market_selection = True
+                    st.success(f"Found {len(matches)} markets. Please select one to analyze.")
                 else:
-                    st.session_state.current_market = None
-                    status_message.markdown("⚠️ **No specific market found. Providing general analysis...**")
+                    st.warning("No markets found. Try a different search query.")
                     
-                    with st.spinner("Analyzing..."):
-                        response = stream_chat_response(st.session_state.messages, None)
-                        st.write(response)
-                
-                st.session_state.messages.append({"role": "assistant", "content": response})
-                
+            st.rerun()
+            
         else:
-            # 追问逻辑 - 直接回答，不进行新搜索
+            # 追问逻辑 - 基于当前市场继续分析
             with st.chat_message("assistant", avatar="🕵️‍♂️"):
                 with st.spinner("Analyzing follow-up..."):
-                    response = stream_chat_response(st.session_state.messages, st.session_state.current_market)
+                    response = stream_chat_response(
+                        st.session_state.messages, 
+                        st.session_state.current_market,
+                        prompt
+                    )
                     st.write(response)
             st.session_state.messages.append({"role": "assistant", "content": response})
         
         st.rerun()
 
-# ================= 📉 6. BOTTOM SECTION: TOP 12 MARKETS =================
+# ================= 📉 7. BOTTOM SECTION: TOP 12 MARKETS =================
 
 st.markdown("---")
 top10_markets = fetch_top_10_markets()
@@ -719,7 +876,7 @@ else:
     </div>
     """, unsafe_allow_html=True)
 
-# ================= 👇 7. 底部协议与说明 =================
+# ================= 👇 8. 底部协议与说明 =================
 st.markdown("<br><br>", unsafe_allow_html=True)
 st.markdown("""
 <style>
