@@ -51,7 +51,11 @@ if "search_results" not in st.session_state:
 if "show_market_selection" not in st.session_state:
     st.session_state.show_market_selection = False  
 if "selected_market_index" not in st.session_state:
-    st.session_state.selected_market_index = -1  
+    st.session_state.selected_market_index = -1
+if "direct_analysis_mode" not in st.session_state:
+    st.session_state.direct_analysis_mode = False  # 是否直接分析模式
+if "user_news_text" not in st.session_state:
+    st.session_state.user_news_text = ""  # 保存用户输入的新闻
 
 # ================= 🎨 2. UI THEME (保持原版不动) =================
 st.markdown("""
@@ -199,6 +203,26 @@ st.markdown("""
         transform: scale(1.05) !important;
         box-shadow: 0 0 10px rgba(220, 38, 38, 0.5) !important;
     }
+    
+    /* Direct Analysis Button */
+    .direct-analysis-btn {
+        background: linear-gradient(90deg, #1e3a8a 0%, #3b82f6 100%) !important;
+        color: white !important;
+        border: none !important;
+        padding: 10px 25px !important;
+        border-radius: 8px !important;
+        font-size: 1rem !important;
+        font-weight: 600 !important;
+        transition: all 0.3s !important;
+        margin-top: 20px !important;
+        width: 100% !important;
+        max-width: 300px !important;
+    }
+    
+    .direct-analysis-btn:hover {
+        transform: scale(1.05) !important;
+        box-shadow: 0 0 15px rgba(59, 130, 246, 0.5) !important;
+    }
 
     /* Top 12 Grid Styles */
     .top10-container {
@@ -299,6 +323,18 @@ st.markdown("""
         background: rgba(127, 29, 29, 0.4);
         color: #f87171;
         border: 1px solid rgba(127, 29, 29, 0.6);
+    }
+    
+    /* No Market Found Container */
+    .no-market-container {
+        background: rgba(17, 24, 39, 0.6);
+        border: 1px solid #374151;
+        border-radius: 12px;
+        padding: 30px;
+        margin: 30px auto;
+        max-width: 800px;
+        backdrop-filter: blur(8px);
+        text-align: center;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -670,19 +706,32 @@ def check_search_intent(user_text, current_market=None):
         print(f"Intent check error: {e}")
         return False
 
-def stream_chat_response(messages, market_data=None, user_query=""):
+def stream_chat_response(messages, market_data=None, user_query="", direct_analysis=False):
     """生成分析响应"""
     model = genai.GenerativeModel('gemini-2.5-flash')
     
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
     
+    # 构建对话历史上下文
     recent_history = "\n".join([
         f"{'User' if msg['role']=='user' else 'Assistant'}: {msg['content'][:100]}..."
         for msg in messages[-3:]
     ]) if len(messages) > 0 else "No previous conversation."
     
-    market_context = ""
-    if market_data:
+    # 根据分析模式构建不同的上下文
+    if direct_analysis:
+        # 直接分析模式：不依赖市场数据
+        market_context = """
+        MODE: DIRECT NEWS ANALYSIS (No specific prediction market found or selected)
+        
+        IMPORTANT: You are analyzing the news directly without specific market data.
+        Focus on:
+        1. Analyzing the news implications broadly
+        2. Identifying potential prediction markets that COULD exist for this news
+        3. Providing strategic insights for decision-makers
+        """
+    elif market_data:
+        # 基于市场的分析模式
         market_context = f"""
         SELECTED MARKET DATA:
         - Event/Question: "{market_data['title']}"
@@ -690,11 +739,17 @@ def stream_chat_response(messages, market_data=None, user_query=""):
         - Trading Volume: ${market_data['volume']:,.0f}
         - Relevance Score: {market_data.get('relevance_score', 'N/A')}
         """
+    else:
+        # 无市场数据的一般分析
+        market_context = """
+        MODE: GENERAL NEWS ANALYSIS
+        Note: No specific prediction market data available for this analysis.
+        """
     
     user_intel = user_query if user_query else "the provided intelligence"
     
     system_prompt = f"""
-    You are Be Holmes, a cynical but rational Macro Hedge Fund Manager specializing in prediction markets.
+    You are Be Holmes, a cynical but rational Macro Hedge Fund Manager and geopolitical risk analyst.
     Current Date: {current_date}
     
     USER'S INTELLIGENCE/QUERY: {user_intel}
@@ -704,24 +759,53 @@ def stream_chat_response(messages, market_data=None, user_query=""):
     RECENT CONVERSATION:
     {recent_history}
     
+    {'='*60}
     ANALYSIS FRAMEWORK:
-    1. **Market Context**: Explain what this prediction market is about
-    2. **Current Sentiment**: Analyze the current odds and what they imply
-    3. **News Impact**: How does the user's intelligence/news affect this market?
-    4. **Market Inefficiencies**: Identify any mispricings or opportunities
-    5. **Risk Assessment**: What are the key risks?
-    6. **Trading Recommendation**: Clear buy/sell/hold recommendation with reasoning
+    """
     
-    CRITICAL REQUIREMENTS:
-    - Be data-driven and quantitative where possible
-    - Maintain a skeptical, contrarian mindset
-    - Provide specific probability estimates if relevant
-    - Suggest position sizing if making a recommendation
-    - Highlight both upside and downside scenarios
-    - Match the user's language (Chinese/English)
+    # 根据不同模式调整分析框架
+    if direct_analysis or not market_data:
+        system_prompt += f"""
+        1. **News Deconstruction**: Break down the key facts and claims in the news
+        2. **Source Credibility**: Assess the reliability of the information source
+        3. **Geopolitical Context**: Place this news in the broader geopolitical landscape
+        4. **Economic Implications**: Analyze potential economic consequences
+        5. **Market Creation Opportunity**: What prediction markets SHOULD exist for this?
+        6. **Risk Assessment**: Identify key risks and their probabilities
+        7. **Strategic Recommendations**: Actionable insights for decision-makers
+        
+        CRITICAL REQUIREMENTS (Direct Analysis Mode):
+        - Think like a hedge fund manager, not just an analyst
+        - Identify second and third-order consequences
+        - Suggest concrete trading/investment ideas (even if not on Polymarket)
+        - Quantify probabilities where possible (e.g., "60% chance that...")
+        - Consider timing and sequencing of events
+        - Highlight asymmetrical risk/reward opportunities
+        """
+    else:
+        system_prompt += f"""
+        1. **Market Context**: Explain what this prediction market is about
+        2. **Current Sentiment**: Analyze the current odds and what they imply
+        3. **News Impact**: How does the user's intelligence/news affect this market?
+        4. **Market Inefficiencies**: Identify any mispricings or opportunities
+        5. **Risk Assessment**: What are the key risks?
+        6. **Trading Recommendation**: Clear buy/sell/hold recommendation with reasoning
+        7. **Position Sizing**: Suggest appropriate position sizing
+        
+        CRITICAL REQUIREMENTS (Market Analysis Mode):
+        - Be data-driven and quantitative where possible
+        - Maintain a skeptical, contrarian mindset
+        - Provide specific probability estimates
+        - Suggest position sizing if making a recommendation
+        - Highlight both upside and downside scenarios
+        """
+    
+    system_prompt += f"""
     
     FORMAT:
-    Start with a brief executive summary, then detailed analysis.
+    Start with a brief executive summary (1-2 sentences), then detailed analysis.
+    Use bold for key points and italic for nuanced observations.
+    Match the user's language (Chinese/English).
     """
     
     history = [{"role": "user", "parts": [system_prompt]}]
@@ -743,6 +827,7 @@ def analyze_selected_market(market_index, user_query):
         selected_market = st.session_state.search_results[market_index]
         st.session_state.current_market = selected_market
         st.session_state.selected_market_index = market_index
+        st.session_state.direct_analysis_mode = False
         
         st.session_state.messages = []
         st.session_state.messages.append({"role": "user", "content": f"Analyze this intel in relation to the selected market: {user_query}"})
@@ -751,7 +836,8 @@ def analyze_selected_market(market_index, user_query):
             response = stream_chat_response(
                 st.session_state.messages, 
                 selected_market,
-                user_query
+                user_query,
+                direct_analysis=False
             )
             st.session_state.messages.append({"role": "assistant", "content": response})
         
@@ -759,21 +845,42 @@ def analyze_selected_market(market_index, user_query):
         return True
     return False
 
+def analyze_directly(user_query):
+    """直接分析新闻（不基于特定市场）"""
+    st.session_state.current_market = None
+    st.session_state.selected_market_index = -1
+    st.session_state.direct_analysis_mode = True
+    
+    st.session_state.messages = []
+    st.session_state.messages.append({"role": "user", "content": f"Analyze this news directly without specific market data: {user_query}"})
+    
+    with st.spinner("🧠 Conducting deep analysis..."):
+        response = stream_chat_response(
+            st.session_state.messages, 
+            None,
+            user_query,
+            direct_analysis=True
+        )
+        st.session_state.messages.append({"role": "assistant", "content": response})
+    
+    st.session_state.show_market_selection = False
+    return True
+
 # ================= 🖥️ 4. MAIN INTERFACE =================
 
 # 4.1 Hero Section
 st.markdown('<h1 class="hero-title">Be Holmes</h1>', unsafe_allow_html=True)
-st.markdown('<p class="hero-subtitle">Explore the world\'s prediction markets with neural search.</p>', unsafe_allow_html=True)
+st.markdown('<p class="hero-subtitle">Expert news analysis & prediction market intelligence</p>', unsafe_allow_html=True)
 
 # 4.2 Search Section
 _, mid, _ = st.columns([1, 6, 1])
 with mid:
-    user_news = st.text_area("Input", height=100, placeholder="Enter news, event, or intelligence to analyze...", label_visibility="collapsed", key="main_search_input")
+    user_news = st.text_area("Input", height=100, placeholder="Paste news, intelligence, or event description for analysis...", label_visibility="collapsed", key="main_search_input")
 
 # 4.3 Button Section
 _, btn_col, _ = st.columns([1, 2, 1])
 with btn_col:
-    ignite_btn = st.button("🔍 Search Markets", use_container_width=True)
+    ignite_btn = st.button("🔍 Search & Analyze", use_container_width=True)
 
 # 4.4 触发搜索逻辑
 if ignite_btn:
@@ -782,9 +889,14 @@ if ignite_btn:
     elif not user_news:
         st.warning("Please enter intelligence to analyze.")
     else:
+        # 保存用户新闻
+        st.session_state.user_news_text = user_news
+        
+        # 重置状态
         st.session_state.messages = []
         st.session_state.current_market = None
         st.session_state.selected_market_index = -1
+        st.session_state.direct_analysis_mode = False
         
         with st.spinner("🔍 Analyzing news and searching Polymarket..."):
             matches, keyword = search_with_exa_optimized(user_news)
@@ -793,11 +905,14 @@ if ignite_btn:
         st.session_state.search_results = matches
         
         if matches:
+            # 找到市场：显示市场选择界面
             st.session_state.show_market_selection = True
             st.rerun()
         else:
-            st.error("❌ No relevant prediction markets found. Try a different query.")
+            # 没有找到市场：直接进行分析
             st.session_state.show_market_selection = False
+            analyze_directly(user_news)
+            st.rerun()
 
 # ================= 🗳️ 5. MARKET SELECTION INTERFACE =================
 
@@ -863,14 +978,27 @@ if st.session_state.show_market_selection and st.session_state.search_results:
         
         with col2:
             if st.button(f"Select", key=f"select_{idx}", use_container_width=True):
-                analyze_selected_market(idx, user_news)
+                analyze_selected_market(idx, st.session_state.user_news_text)
                 st.rerun()
     
-    # 如果没有找到想要的市场
+    # 添加"直接分析"按钮
+    st.markdown("<br>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("🧠 Direct News Analysis (No Market)", use_container_width=True, type="secondary"):
+            analyze_directly(st.session_state.user_news_text)
+            st.rerun()
+    
+    # 说明文字
     st.markdown("""
     <div style="text-align: center; margin-top: 30px; padding: 20px; background: rgba(255,255,255,0.03); border-radius: 10px;">
-        <p style="color: #9ca3af; margin-bottom: 10px;">Don't see the market you're looking for?</p>
-        <p style="color: #ef4444; font-size: 0.9rem;">Try refining your search query or check the trending markets below.</p>
+        <p style="color: #9ca3af; margin-bottom: 10px;">💡 <strong>Two Analysis Modes:</strong></p>
+        <p style="color: #9ca3af; font-size: 0.9rem; margin-bottom: 5px;">
+        <span style="color: #ef4444;">• Market-Based Analysis</span>: Select a market above for targeted trading insights
+        </p>
+        <p style="color: #9ca3af; font-size: 0.9rem;">
+        <span style="color: #3b82f6;">• Direct News Analysis</span>: Click the blue button for broader strategic analysis without specific market data
+        </p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -879,7 +1007,31 @@ if st.session_state.show_market_selection and st.session_state.search_results:
 if not st.session_state.show_market_selection and st.session_state.messages:
     st.markdown("---")
     
-    if st.session_state.current_market:
+    # 显示当前分析模式
+    if st.session_state.direct_analysis_mode:
+        st.markdown(f"""
+        <div class="market-card">
+            <div style="font-size:0.9rem; color:#3b82f6; margin-bottom:5px;">
+                📰 <strong>DIRECT NEWS ANALYSIS MODE</strong>
+            </div>
+            <div style="font-size:1.1rem; color:#e5e7eb; margin-bottom:10px; font-weight:bold;">
+                Analyzing: "{st.session_state.user_news_text[:100]}..."
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:flex-end;">
+                <div>
+                    <div style="font-family:'Plus Jakarta Sans'; color:#3b82f6; font-size:1.5rem; font-weight:700;">
+                        Strategic Intelligence
+                    </div>
+                    <div style="color:#9ca3af; font-size:0.8rem;">Geopolitical & Economic Analysis</div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="color:#e5e7eb; font-weight:600; font-size:1.1rem;">No Market Data</div>
+                    <div style="color:#9ca3af; font-size:0.8rem;">Pure News Analysis</div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    elif st.session_state.current_market:
         m = st.session_state.current_market
         relevance_score = m.get('relevance_score', 0)
         
@@ -893,7 +1045,9 @@ if not st.session_state.show_market_selection and st.session_state.messages:
         
         st.markdown(f"""
         <div class="market-card">
-            <div style="font-size:0.9rem; color:#9ca3af; margin-bottom:5px;">SELECTED MARKET • {relevance_indicator}</div>
+            <div style="font-size:0.9rem; color:#ef4444; margin-bottom:5px;">
+                📊 <strong>MARKET-BASED ANALYSIS</strong> • {relevance_indicator}
+            </div>
             <div style="font-size:1.2rem; color:#e5e7eb; margin-bottom:10px; font-weight:bold;">{m['title']}</div>
             <div style="display:flex; justify-content:space-between; align-items:flex-end;">
                 <div>
@@ -911,15 +1065,21 @@ if not st.session_state.show_market_selection and st.session_state.messages:
         </div>
         """, unsafe_allow_html=True)
     
+    # 显示消息历史
     for i, msg in enumerate(st.session_state.messages):
         if i == 0: continue 
         
         with st.chat_message(msg["role"], avatar="🕵️‍♂️" if msg["role"] == "assistant" else "👤"):
             if i == 1:
-                st.markdown(f"<div style='border-left:3px solid #dc2626; padding-left:15px;'>{msg['content']}</div>", unsafe_allow_html=True)
+                # 第一条助手消息特殊样式
+                if st.session_state.direct_analysis_mode:
+                    st.markdown(f"<div style='border-left:3px solid #3b82f6; padding-left:15px;'>{msg['content']}</div>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<div style='border-left:3px solid #dc2626; padding-left:15px;'>{msg['content']}</div>", unsafe_allow_html=True)
             else:
                 st.write(msg["content"])
 
+    # 聊天输入
     if prompt := st.chat_input("Ask a follow-up question or search for a new topic..."):
         with st.chat_message("user", avatar="👤"):
             st.write(prompt)
@@ -928,9 +1088,11 @@ if not st.session_state.show_market_selection and st.session_state.messages:
         is_search = check_search_intent(prompt, st.session_state.current_market)
         
         if is_search:
+            # 新搜索逻辑
             st.session_state.show_market_selection = False
             st.session_state.current_market = None
             st.session_state.messages = []
+            st.session_state.user_news_text = prompt  # 更新用户新闻
             
             with st.chat_message("assistant", avatar="🕵️‍♂️"):
                 st.write(f"🔍 Searching for new markets related to: **{prompt}**")
@@ -944,17 +1106,20 @@ if not st.session_state.show_market_selection and st.session_state.messages:
                     st.session_state.show_market_selection = True
                     st.success(f"Found {len(matches)} markets. Please select one to analyze.")
                 else:
-                    st.warning("No markets found. Try a different search query.")
+                    st.warning("No markets found. Switching to direct analysis mode...")
+                    analyze_directly(prompt)
                     
             st.rerun()
             
         else:
+            # 追问逻辑
             with st.chat_message("assistant", avatar="🕵️‍♂️"):
                 with st.spinner("Analyzing follow-up..."):
                     response = stream_chat_response(
                         st.session_state.messages, 
                         st.session_state.current_market,
-                        prompt
+                        prompt,
+                        direct_analysis=st.session_state.direct_analysis_mode
                     )
                     st.write(response)
             st.session_state.messages.append({"role": "assistant", "content": response})
@@ -1019,26 +1184,44 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-with st.expander("Operational Protocol & System Architecture"):
+with st.expander("Dual-Mode Analysis System"):
     lang_mode = st.radio("Language", ["EN", "CN"], horizontal=True, label_visibility="collapsed")
     st.markdown("<br>", unsafe_allow_html=True)
     if lang_mode == "EN":
         st.markdown("""
         <div class="protocol-container">
-            <div class="protocol-step"><span class="protocol-title">1. Entity Extraction (Intelligence)</span>Gemini extracts core entities (Tesla, Musk, FSD) and ranks by importance.</div>
-            <div class="protocol-step"><span class="protocol-title">2. Semantic Search (Mapping)</span>Exa.ai searches with prioritized queries based on entity relevance.</div>
-            <div class="protocol-step"><span class="protocol-title">3. Relevance Scoring (Filtering)</span>Markets are scored by entity match and sorted for optimal selection.</div>
+            <div class="protocol-step">
+                <span class="protocol-title">1. Market-Based Analysis (Red Mode)</span>
+                For traders and investors: Analyze news through the lens of specific prediction markets. Provides targeted trading insights, position sizing recommendations, and market inefficiency identification.
+            </div>
+            <div class="protocol-step">
+                <span class="protocol-title">2. Direct News Analysis (Blue Mode)</span>
+                For strategists and decision-makers: Pure news analysis without market constraints. Focuses on geopolitical implications, economic consequences, risk assessment, and strategic recommendations.
+            </div>
+            <div class="protocol-step">
+                <span class="protocol-title">3. Intelligent Routing</span>
+                System automatically switches to Direct Analysis when no relevant markets are found, ensuring all news receives professional analysis regardless of market availability.
+            </div>
         </div>""", unsafe_allow_html=True)
     else:
         st.markdown("""
         <div class="protocol-container">
-            <div class="protocol-step"><span class="protocol-title">1. 实体提取 (Entity Extraction)</span>Gemini提取核心实体（特斯拉、马斯克、FSD）并按重要性排序。</div>
-            <div class="protocol-step"><span class="protocol-title">2. 语义搜索 (Semantic Search)</span>Exa.ai根据实体相关性使用优先级查询进行搜索。</div>
-            <div class="protocol-step"><span class="protocol-title">3. 相关性评分 (Relevance Scoring)</span>根据实体匹配度对市场进行评分和排序。</div>
+            <div class="protocol-step">
+                <span class="protocol-title">1. 市场驱动分析 (红色模式)</span>
+                针对交易员和投资者：通过特定预测市场分析新闻。提供针对性交易洞察、头寸规模建议和市场无效性识别。
+            </div>
+            <div class="protocol-step">
+                <span class="protocol-title">2. 直接新闻分析 (蓝色模式)</span>
+                针对战略家和决策者：无市场约束的纯粹新闻分析。专注于地缘政治影响、经济后果、风险评估和战略建议。
+            </div>
+            <div class="protocol-step">
+                <span class="protocol-title">3. 智能路由系统</span>
+                当未找到相关市场时，系统自动切换到直接分析模式，确保所有新闻都能获得专业分析，无论市场可用性如何。
+            </div>
         </div>""", unsafe_allow_html=True)
     st.markdown("""
     <div class="credits-section">
-        ENHANCED SEMANTIC SEARCH POWERED BY<br>
-        <span class="credits-highlight">Gemini Entity Extraction</span> & <span class="credits-highlight">Exa.ai Neural Search</span><br><br>
-        Data Stream: Polymarket Gamma API
+        DUAL-MODE ANALYSIS SYSTEM<br>
+        <span class="credits-highlight">Market Intelligence (Red)</span> & <span class="credits-highlight">Strategic Intelligence (Blue)</span><br><br>
+        Powered by Gemini • Exa.ai • Polymarket API
     </div>""", unsafe_allow_html=True)
