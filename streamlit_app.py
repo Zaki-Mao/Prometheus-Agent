@@ -42,6 +42,10 @@ if "current_market" not in st.session_state:
     st.session_state.current_market = None 
 if "first_visit" not in st.session_state:
     st.session_state.first_visit = True 
+if "last_search_query" not in st.session_state:
+    st.session_state.last_search_query = ""
+if "chat_history_context" not in st.session_state:
+    st.session_state.chat_history_context = []
 
 # ================= 🎨 2. UI THEME (保持原版不动) =================
 st.markdown("""
@@ -221,41 +225,87 @@ st.markdown("""
 # ================= 🧠 3. LOGIC CORE =================
 
 def generate_english_keywords(user_text):
+    """更智能的关键词提取"""
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
-        prompt = f"""Task: Extract English search keywords for Polymarket. Input: "{user_text}". Output: Keywords only."""
+        prompt = f"""
+        Extract concise English search keywords for searching prediction markets on Polymarket.
+        
+        User Query: "{user_text}"
+        
+        Output format: Just the keywords, separated by spaces.
+        Keep it short and focused on the main entities and events.
+        """
         resp = model.generate_content(prompt)
-        return resp.text.strip()
-    except: return user_text
+        keywords = resp.text.strip()
+        
+        # 如果提取失败，使用简单的规则
+        if not keywords or len(keywords.split()) > 10:
+            # 移除常见问题词，保留核心内容
+            stop_words = ["what", "how", "when", "where", "why", "who", "is", "are", "will", "the", "this", "that"]
+            words = user_text.lower().split()
+            keywords = " ".join([w for w in words if w not in stop_words][:5])
+        
+        return keywords
+    except Exception as e:
+        print(f"Keyword generation error: {e}")
+        # 回退：只保留字母数字和空格
+        cleaned = re.sub(r'[^a-zA-Z0-9\s]', ' ', user_text)
+        return cleaned[:50]
 
-def search_with_exa(query):
-    if not EXA_AVAILABLE or not EXA_API_KEY: return [], query
+def search_with_exa(query, use_enhanced=True):
+    """增强版搜索，支持对话上下文"""
+    if not EXA_AVAILABLE or not EXA_API_KEY: 
+        return [], query
+    
+    # 如果查询很短（可能是追问），尝试结合历史上下文
     search_query = generate_english_keywords(query)
+    
+    # 对于简短的追问，可以结合之前的搜索词
+    if len(query.split()) < 3 and st.session_state.last_search_query:
+        search_query = f"{st.session_state.last_search_query} {search_query}"
+    
     markets_found, seen_ids = [], set()
     try:
         exa = Exa(EXA_API_KEY)
-        # 15个结果 + "prediction market about" 锚点 = 最稳的 Exa 搜索配置
-        search_response = exa.search(
-            f"prediction market about {search_query}",
-            num_results=15, 
-            type="neural", 
-            include_domains=["polymarket.com"]
-        )
         
-        for result in search_response.results:
-            match = re.search(r'polymarket\.com/(?:event|market)/([^/]+)', result.url)
-            if match:
-                slug = match.group(1)
-                # 过滤无关页面
-                if slug not in ['profile', 'login', 'leaderboard', 'rewards', 'orders', 'activity'] and slug not in seen_ids:
-                    market_data = fetch_poly_details(slug)
-                    if market_data:
-                        markets_found.extend(market_data)
-                        seen_ids.add(slug)
-                        # 找到 5 个有效结果就停止，兼顾速度
-                        if len(markets_found) >= 5: break
+        # 尝试不同的搜索策略
+        search_strategies = [
+            f"prediction market about {search_query}",
+            f"Polymarket {search_query}",
+            f"{search_query} market odds"
+        ]
+        
+        for strategy in search_strategies:
+            if len(markets_found) >= 3:  # 找到足够结果就停止
+                break
+                
+            try:
+                search_response = exa.search(
+                    strategy,
+                    num_results=10, 
+                    type="neural", 
+                    include_domains=["polymarket.com"]
+                )
+                
+                for result in search_response.results:
+                    match = re.search(r'polymarket\.com/(?:event|market)/([^/]+)', result.url)
+                    if match:
+                        slug = match.group(1)
+                        # 过滤无关页面
+                        if slug not in ['profile', 'login', 'leaderboard', 'rewards', 'orders', 'activity'] and slug not in seen_ids:
+                            market_data = fetch_poly_details(slug)
+                            if market_data:
+                                markets_found.extend(market_data)
+                                seen_ids.add(slug)
+                                
+            except Exception as e:
+                print(f"Search strategy error: {e}")
+                continue
                         
-    except Exception as e: print(f"Search error: {e}")
+    except Exception as e: 
+        print(f"Search error: {e}")
+    
     return markets_found, search_query
 
 @st.cache_data(ttl=60)
@@ -372,7 +422,6 @@ def normalize_data(m):
 
 # ================= 🧠 3.1 AGENT BRAIN (Smart Router + Safety) =================
 
-# 🛡️ 暴力解锁：放行所有安全限制，防止 ValueError
 safety_config = {
     HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
     HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
@@ -382,62 +431,110 @@ safety_config = {
 
 def check_search_intent(user_text, current_market=None):
     """
-    🔥 升级版 Router：不仅看是否有 'search' 关键词，还看话题是否跑偏了。
+    更精准的意图判断，区分追问和新搜索
     """
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        current_topic_context = ""
-        if current_market:
-            current_topic_context = f"Current Topic Context: {current_market['title']}"
+        # 构建上下文信息
+        context = {
+            'current_market': current_market['title'] if current_market else None,
+            'last_search': st.session_state.last_search_query,
+            'is_follow_up': len(st.session_state.messages) > 1
+        }
         
         prompt = f"""
-        User Input: "{user_text}"
-        {current_topic_context}
+        Analyze if the user wants to search for a NEW prediction market topic.
         
-        Your Job: Determine if the user is asking about a NEW topic that requires a fresh search, OR if they are just chatting about the current topic.
+        CONTEXT:
+        - Current topic: {context['current_market']}
+        - Last search: {context['last_search']}
+        - Is follow-up conversation: {context['is_follow_up']}
         
-        - If user asks "What about SpaceX?" and current topic is "DeepSeek" -> YES (New topic).
-        - If user asks "Who is betting on it?" and current topic is "DeepSeek" -> NO (Follow up).
-        - If user explicitly says "Search for..." -> YES.
+        USER INPUT: "{user_text}"
         
-        Output only YES or NO.
+        CONSIDER THESE EXAMPLES:
+        - "Search for Bitcoin price prediction" → YES (explicit search)
+        - "What about Tesla stock?" → YES (new topic)
+        - "How does this affect the odds?" → NO (follow-up about current topic)
+        - "Explain more about this market" → NO (follow-up)
+        - "Find markets about politics" → YES (new search)
+        - "Who is betting on this?" → NO (follow-up)
+        - "What are the risks?" → NO (follow-up)
+        - "Show me SpaceX markets" → YES (new topic)
+        
+        RULES:
+        1. If user explicitly says "search", "find", "look for", "show me" → YES
+        2. If user mentions a completely different entity/topic → YES
+        3. If user asks about details/analysis/opinion of current topic → NO
+        4. If query is very short (1-3 words) and not obviously new → NO
+        
+        Output only "YES" or "NO".
         """
-        # 加上 safety_settings 防止路由本身被拦截
+        
         resp = model.generate_content(prompt, safety_settings=safety_config)
-        return "YES" in resp.text.upper()
-    except: return False # 默认保守策略
+        result = resp.text.strip().upper()
+        
+        # 安全回退：如果结果不明确，使用简单规则
+        if "YES" in result:
+            return True
+        elif "NO" in result:
+            return False
+        else:
+            # 使用简单规则作为回退
+            search_triggers = ["search", "find", "look for", "show me", "new", "different"]
+            if any(trigger in user_text.lower() for trigger in search_triggers):
+                return True
+            # 如果当前有市场且用户输入很短，很可能是追问
+            if current_market and len(user_text.split()) <= 3:
+                return False
+            return False
+            
+    except Exception as e:
+        print(f"Intent check error: {e}")
+        # 出错时保守策略：不触发新搜索
+        return False
 
 def stream_chat_response(messages, market_data=None):
     model = genai.GenerativeModel('gemini-2.5-flash')
     
-    # 📅 注入当前日期，解决“穿越”问题
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
+    
+    # 构建对话历史上下文（最后3条消息）
+    recent_history = "\n".join([
+        f"{'User' if msg['role']=='user' else 'Assistant'}: {msg['content'][:100]}..."
+        for msg in messages[-3:]
+    ])
     
     market_context = ""
     if market_data:
-        # 🤐 修复：去掉了 [LOCKED] 标签，改用自然语言，防止 AI 朗读标签
         market_context = f"""
-        Relevant Real-Time Market Data:
+        RELEVANT MARKET DATA:
         - Event: "{market_data['title']}"
         - Current Odds: {market_data['odds']}
         - Volume: ${market_data['volume']:,.0f}
         """
     else:
-        market_context = "Note: No direct prediction market data found for this specific query."
+        market_context = "Note: No specific market data found for this query."
     
     system_prompt = f"""
-    You are **Be Holmes**, a rational Macro Hedge Fund Manager.
-    **Current Date:** {current_date}
+    You are Be Holmes, a cynical but rational Macro Hedge Fund Manager.
+    Current Date: {current_date}
+    
+    RECENT CONVERSATION:
+    {recent_history}
     
     {market_context}
     
-    **INSTRUCTIONS:**
-    1. **Consistency Check:** First, check if the "Relevant Real-Time Market Data" matches the user's query. 
-       - If MATCH (e.g. user asks about Trump, data is about Trump): Analyze the odds.
-       - If NO MATCH (e.g. user asks about SpaceX, data is about Alibaba): IGNORE the market data completely and rely on your internal knowledge. Explicitly say "I don't have live market data for this specific topic, but here is my analysis..."
-    2. **Tone:** Be cynical, data-driven, and professional.
-    3. **Language:** Automatically respond in the same language as the user (Chinese/English).
+    RESPONSE GUIDELINES:
+    1. If market data is relevant to the query, analyze it directly
+    2. If market data is irrelevant, acknowledge it and provide general analysis
+    3. Maintain consistent persona: data-driven, skeptical, professional
+    4. Automatically match the user's language (Chinese/English)
+    5. For follow-up questions, maintain continuity with previous discussion
+    6. Provide actionable insights and specific recommendations when possible
+    
+    Always end with a clear stance or recommendation if appropriate.
     """
     
     history = [{"role": "user", "parts": [system_prompt]}]
@@ -449,7 +546,7 @@ def stream_chat_response(messages, market_data=None):
         response = model.generate_content(history, safety_settings=safety_config)
         return response.text
     except ValueError:
-        return "⚠️ Safety Filter Triggered. Please rephrase your query."
+        return "⚠️ Safety filter triggered. Please rephrase your query."
     except Exception as e:
         return f"⚠️ Error: {str(e)}"
 
@@ -482,6 +579,9 @@ if ignite_btn:
         
         with st.spinner("Neural Searching..."):
             matches, keyword = search_with_exa(user_news)
+        
+        # 保存搜索查询
+        st.session_state.last_search_query = keyword
         
         if matches:
             st.session_state.current_market = matches[0]
@@ -529,6 +629,7 @@ if st.session_state.messages:
         </div>
         """, unsafe_allow_html=True)
 
+    # 显示消息历史
     for i, msg in enumerate(st.session_state.messages):
         if i == 0: continue 
         
@@ -538,34 +639,55 @@ if st.session_state.messages:
             else:
                 st.write(msg["content"])
 
+    # 聊天输入
     if prompt := st.chat_input("Ask a follow-up or search for a new topic..."):
+        # 添加用户消息
         with st.chat_message("user", avatar="👤"):
             st.write(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
         
-        # 🔥 更新：调用新的 check_search_intent，传入 current_market 做对比
+        # 判断是否需要进行新搜索
         is_search = check_search_intent(prompt, st.session_state.current_market)
         
         if is_search:
+            # 新搜索逻辑
             with st.chat_message("assistant", avatar="🕵️‍♂️"):
-                st.write(f"🔄 Detected search intent. Scanning prediction markets for: **{prompt}**...")
-                with st.spinner("Searching Polymarket..."):
-                    matches, _ = search_with_exa(prompt)
+                status_message = st.empty()
+                status_message.markdown("🔍 **Searching for relevant prediction markets...**")
+                
+                with st.spinner("Scanning Polymarket..."):
+                    matches, keyword = search_with_exa(prompt)
                 
                 if matches:
-                    st.session_state.current_market = matches[0] 
-                    st.success(f"Found: {matches[0]['title']}")
+                    st.session_state.current_market = matches[0]
+                    st.session_state.last_search_query = keyword
+                    status_message.markdown(f"✅ **Found market:** *{matches[0]['title']}*")
+                    
+                    # 短暂延迟后生成分析
                     time.sleep(1)
-                    st.rerun()
+                    with st.spinner("Analyzing new market..."):
+                        response = stream_chat_response(st.session_state.messages, st.session_state.current_market)
+                        st.write(response)
+                    
                 else:
                     st.session_state.current_market = None
-                    st.warning("No market found. Analyzing generally...")
+                    status_message.markdown("⚠️ **No specific market found. Providing general analysis...**")
                     
-        with st.chat_message("assistant", avatar="🕵️‍♂️"):
-            with st.spinner("Thinking..."):
-                response = stream_chat_response(st.session_state.messages, st.session_state.current_market)
-                st.write(response)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+                    with st.spinner("Analyzing..."):
+                        response = stream_chat_response(st.session_state.messages, None)
+                        st.write(response)
+                
+                st.session_state.messages.append({"role": "assistant", "content": response})
+                
+        else:
+            # 追问逻辑 - 直接回答，不进行新搜索
+            with st.chat_message("assistant", avatar="🕵️‍♂️"):
+                with st.spinner("Analyzing follow-up..."):
+                    response = stream_chat_response(st.session_state.messages, st.session_state.current_market)
+                    st.write(response)
+            st.session_state.messages.append({"role": "assistant", "content": response})
+        
+        st.rerun()
 
 # ================= 📉 6. BOTTOM SECTION: TOP 12 MARKETS =================
 
@@ -640,7 +762,7 @@ with st.expander("Operational Protocol & System Architecture"):
         <div class="protocol-container">
             <div class="protocol-step"><span class="protocol-title">1. 情报注入 (Intelligence Injection)</span>用户输入非结构化数据，系统解析语义核心。</div>
             <div class="protocol-step"><span class="protocol-title">2. 神经语义映射 (Neural Mapping)</span>由 <b>Exa.ai</b> 驱动，精准定位预测市场。</div>
-            <div class="protocol-step"><span class="protocol-title">3. 贝叶斯阿尔法解码 (Alpha Decoding)</span><b>Google Gemini</b> 计算“预期差”，判断套利空间。</div>
+            <div class="protocol-step"><span class="protocol-title">3. 贝叶斯阿尔法解码 (Alpha Decoding)</span><b>Google Gemini</b> 计算"预期差"，判断套利空间。</div>
         </div>""", unsafe_allow_html=True)
     st.markdown("""
     <div class="credits-section">
