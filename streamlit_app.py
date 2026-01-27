@@ -112,6 +112,27 @@ st.markdown("""
         align-items: center;
     }
 
+    /* World Clock Styles */
+    .world-clock-bar {
+        display: flex; 
+        justify-content: space-between; 
+        background: rgba(0,0,0,0.3); 
+        padding: 8px 12px; 
+        border-radius: 6px; 
+        margin-bottom: 15px;
+        border: 1px solid rgba(255,255,255,0.08);
+        font-family: 'Courier New', monospace; /* 更有终端感 */
+    }
+    .clock-item {
+        font-size: 0.75rem;
+        color: #9ca3af;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+    .clock-item b { color: #e5e7eb; font-weight: 700; }
+    .clock-time { color: #10b981; } /* 绿色数字 */
+
     /* News Feed Grid Cards */
     .news-grid-card {
         background: rgba(255, 255, 255, 0.03);
@@ -197,7 +218,7 @@ st.markdown("""
 
 # ================= 🧠 3. LOGIC CORE =================
 
-# --- A. News Logic (缓存 5 分钟，防止频繁请求) ---
+# --- A. News Logic (缓存 5 分钟) ---
 @st.cache_data(ttl=300)
 def fetch_rss_news():
     rss_urls = [
@@ -408,7 +429,7 @@ if not st.session_state.messages:
 
     # === LEFT: Live Noise Stream (Auto-Refreshing) ===
     with col_news:
-        # 顶部标题栏 + 新闻源说明
+        # 顶部标题栏
         st.markdown("""
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:8px;">
             <div style="font-size:0.9rem; font-weight:700; text-transform:uppercase; letter-spacing:1px;">
@@ -418,30 +439,48 @@ if not st.session_state.messages:
                 ● LIVE
             </div>
         </div>
-        <div style="font-size:0.7rem; color:#6b7280; margin-bottom:15px; font-style:italic;">
-            Sources: Reuters • TechCrunch • CoinDesk
-        </div>
         <style>
             @keyframes pulse { 0% {opacity: 1;} 50% {opacity: 0.4;} 100% {opacity: 1;} }
         </style>
         """, unsafe_allow_html=True)
 
-        # 🔥 核心修改：使用 st.fragment 实现局部自动刷新 (每 1 秒刷新时间)
-        # 数据 fetch_rss_news 本身有缓存，所以这里 run_every=1 只是刷新 UI 时间显示
+        # 🔥 核心修改：使用 st.fragment 实现每秒刷新UI，但数据抓取有5分钟缓存
         @st.fragment(run_every=1)
         def render_news_feed():
-            # 获取最新新闻 (带缓存，不会频繁请求)
-            latest_news = fetch_rss_news()
+            # 1. 渲染全球时间 (World Clock)
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
+            times = {
+                "NYC": (now_utc - datetime.timedelta(hours=5)).strftime("%H:%M"),
+                "LON": now_utc.strftime("%H:%M"),
+                "ABD": (now_utc + datetime.timedelta(hours=4)).strftime("%H:%M"), # Abu Dhabi
+                "BJS": (now_utc + datetime.timedelta(hours=8)).strftime("%H:%M"), # Beijing
+            }
             
-            # 显示更新时间戳 (每秒跳动)
-            current_time = datetime.datetime.now().strftime("%H:%M:%S")
-            st.caption(f"Last updated: {current_time}")
+            st.markdown(f"""
+            <div class="world-clock-bar">
+                <span class="clock-item"><b>NYC</b> <span class="clock-time">{times['NYC']}</span></span>
+                <span class="clock-item"><b>LON</b> <span class="clock-time">{times['LON']}</span></span>
+                <span class="clock-item"><b>ABD</b> <span class="clock-time">{times['ABD']}</span></span>
+                <span class="clock-item"><b>BJS</b> <span class="clock-time" style="color:#ef4444">{times['BJS']}</span></span>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # 2. 倒计时逻辑 (刷新倒计时)
+            # 计算距离下一次缓存失效 (300s) 的时间
+            seconds_left = 300 - (int(time.time()) % 300)
+            mins, secs = divmod(seconds_left, 60)
+            timer_str = f"{mins:02d}:{secs:02d}"
+            
+            st.caption(f"Sources: Reuters • TechCrunch • CoinDesk | Next update in: {timer_str}")
+
+            # 3. 获取新闻 (带缓存，所以虽然每秒调用，但不会频繁请求API)
+            latest_news = fetch_rss_news()
 
             if not latest_news:
                 st.info("Scanning global feeds...")
                 return
 
-            # 使用 Grid 布局 (每行2个)
+            # 4. 渲染双列新闻网格
             rows = [latest_news[i:i+2] for i in range(0, len(latest_news), 2)]
             
             for row in rows:
