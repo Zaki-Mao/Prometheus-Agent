@@ -1,3 +1,4 @@
+
 import streamlit as st
 import requests
 import json
@@ -142,7 +143,8 @@ st.markdown("""
         border-left: 3px solid #dc2626;
         border-radius: 8px;
         padding: 15px;
-        height: 180px; /* 🔥 固定高度确保对齐 */
+        height: 100%;
+        min-height: 140px;
         display: flex;
         flex-direction: column;
         justify-content: space-between;
@@ -167,10 +169,9 @@ st.markdown("""
         color: #e5e7eb;
         line-height: 1.4;
         font-weight: 500;
-        margin-bottom: 10px;
-        flex: 1; /* 🔥 让内容填充可用空间 */
+        margin-bottom: 15px;
         display: -webkit-box;
-        -webkit-line-clamp: 4; /* 🔥 固定4行文本 */
+        -webkit-line-clamp: 3;
         -webkit-box-orient: vertical;
         overflow: hidden;
     }
@@ -180,13 +181,10 @@ st.markdown("""
         background: rgba(255, 255, 255, 0.02);
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 8px;
-        padding: 15px; /* 🔥 增加内边距匹配新闻卡片 */
-        height: 90px; /* 🔥 固定高度 */
+        padding: 12px;
         margin-bottom: 10px;
         transition: all 0.2s;
         cursor: pointer;
-        display: flex;
-        align-items: center;
     }
     .market-card-modern:hover {
         border-color: #ef4444;
