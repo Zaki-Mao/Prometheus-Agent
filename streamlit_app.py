@@ -499,9 +499,10 @@ def process_polymarket_event(event):
 
 @st.cache_data(ttl=60)
 def fetch_polymarket_v5_simple(limit=60):
-    """Fetch Top Markets for Homepage"""
+    """Fetch Top Markets for Homepage with Volume Sort"""
     try:
-        url = "https://gamma-api.polymarket.com/events?limit=100&closed=false"
+        # 🔥 FIX: Use server-side sorting to get ACTUAL top volume markets
+        url = "https://gamma-api.polymarket.com/events?limit=50&closed=false&sort=volume&order=desc"
         resp = requests.get(url, timeout=8).json()
         markets = []
         
@@ -511,6 +512,7 @@ def fetch_polymarket_v5_simple(limit=60):
                 if market_data:
                     markets.append(market_data)
         
+        # Local fallback sort just in case
         markets.sort(key=lambda x: x['volume'], reverse=True)
         return markets[:limit]
     except: return []
@@ -525,7 +527,7 @@ def search_market_data_list(user_query):
         
         search_resp = exa.search(
             f"site:polymarket.com {keywords}",
-            num_results=25, # Increased search depth
+            num_results=25, # 🔥 Boosted Search Depth
             type="neural",
             include_domains=["polymarket.com"]
         )
@@ -546,7 +548,7 @@ def search_market_data_list(user_query):
                     if market_data:
                         candidates.append(market_data)
     except: pass
-    return candidates # No limit, return all found
+    return candidates # No truncation
 
 # --- 🔥 D. AGENT LOGIC ---
 def generate_keywords(user_text):
@@ -784,7 +786,7 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
             </div>
             """, unsafe_allow_html=True)
 
-        # 2. Sub-Markets Loop (Native Streamlit)
+        # 2. Sub-Markets Loop (Native Streamlit - Robust)
         st.markdown("##### 📊 Sub-Market Details")
         for idx, market in enumerate(m.get('markets', []), 1):
             with st.container():
@@ -799,7 +801,10 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
                         st.progress(market['no_price'] / 100)
                         st.caption(f"No: {market['no_price']:.1f}%")
                 else:
-                    sorted_opts = sorted(market.get('options', []), key=lambda x: x.get('price', 0), reverse=True)[:3]
+                    try:
+                        sorted_opts = sorted(market.get('options', []), key=lambda x: x.get('price', 0), reverse=True)[:3]
+                    except: sorted_opts = []
+                    
                     for opt in sorted_opts:
                         c1, c2 = st.columns([1, 4])
                         with c1:
