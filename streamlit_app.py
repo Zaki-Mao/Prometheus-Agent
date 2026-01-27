@@ -55,13 +55,6 @@ for key, value in default_state.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
-# --- 🟢 处理点击新闻的回调函数 ---
-def trigger_analysis(news_title):
-    st.session_state.user_news_text = news_title
-    st.session_state.show_market_selection = False
-    st.session_state.current_market = None
-    st.session_state.is_processing = False 
-
 # ================= 🎨 2. UI THEME (CSS) =================
 st.markdown("""
 <style>
@@ -98,15 +91,7 @@ st.markdown("""
         min-height: 1.5em;
     }
 
-    /* 左右分栏容器样式 */
-    .split-container {
-        background: rgba(17, 24, 39, 0.4);
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        border-radius: 12px;
-        padding: 15px;
-        height: 100%;
-        backdrop-filter: blur(5px);
-    }
+    /* Section Headers */
     .section-header {
         font-size: 0.9rem;
         font-weight: 700;
@@ -120,22 +105,43 @@ st.markdown("""
         align-items: center;
     }
 
-    /* News Feed Styles */
-    .news-item {
-        padding: 10px;
-        margin-bottom: 8px;
+    /* News Feed Grid Cards */
+    .news-grid-card {
         background: rgba(255, 255, 255, 0.03);
-        border-left: 2px solid #ef4444; /* Red for Noise */
-        border-radius: 4px;
-        cursor: pointer;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        padding: 15px;
+        height: 100%;
+        min-height: 140px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
         transition: all 0.2s;
     }
-    .news-item:hover {
+    .news-grid-card:hover {
         background: rgba(255, 255, 255, 0.08);
-        transform: translateX(2px);
+        border-color: rgba(255, 255, 255, 0.1);
+        transform: translateY(-2px);
     }
-    .news-source { font-size: 0.7rem; color: #9ca3af; margin-bottom: 2px; }
-    .news-headline { font-size: 0.9rem; color: #e5e7eb; line-height: 1.4; font-weight: 500; }
+    .news-meta {
+        font-size: 0.7rem;
+        color: #ef4444;
+        font-weight: 600;
+        margin-bottom: 8px;
+        display: flex;
+        justify-content: space-between;
+    }
+    .news-body {
+        font-size: 0.9rem;
+        color: #e5e7eb;
+        line-height: 1.4;
+        font-weight: 500;
+        margin-bottom: 15px;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
     
     /* Market Spectrum Styles */
     .market-mini-card {
@@ -196,14 +202,14 @@ def fetch_rss_news():
     try:
         for url in rss_urls:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:3]:
+            for entry in feed.entries[:4]: # 取更多，因为是双列
                 news.append({
                     "title": entry.title,
                     "source": feed.feed.title if 'title' in feed.feed else "News",
                     "link": entry.link
                 })
     except: pass
-    return news[:9] # Return top 9 mixed
+    return news[:12] # Limit total
 
 # --- B. Market Logic (Categorized) ---
 @st.cache_data(ttl=60)
@@ -225,7 +231,7 @@ def fetch_categorized_markets():
                     if "Yes" in outcomes:
                         yes_price = float(prices[outcomes.index("Yes")]) * 100
                     else:
-                        yes_price = float(max([float(x) for x in prices])) * 100 # Categorical fallback
+                        yes_price = float(max([float(x) for x in prices])) * 100 
                     
                     market_obj = {
                         "title": event.get('title'),
@@ -233,23 +239,19 @@ def fetch_categorized_markets():
                         "slug": event.get('slug')
                     }
                     
-                    # 🏛️ Consensus: > 75% or < 25% (High certainty)
                     if yes_price >= 75 or yes_price <= 25:
                         categories["consensus"].append(market_obj)
-                    # ⚡ Battleground: 40% - 60% (High uncertainty)
                     elif 40 <= yes_price <= 60:
                         categories["battleground"].append(market_obj)
                         
                 except: continue
-                
-        # Limit distinct items
         return {
             "consensus": categories["consensus"][:4], 
             "battleground": categories["battleground"][:4]
         }
     except: return {"consensus": [], "battleground": []}
 
-# --- C. Search & AI Logic (Existing) ---
+# --- C. Search & AI Logic ---
 def generate_english_keywords(user_text):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -271,7 +273,6 @@ def search_with_exa_optimized(user_text):
             if match:
                 slug = match.group(1)
                 if slug not in seen and slug not in ['profile', 'login', 'activity']:
-                    # Quick fetch details
                     url = f"https://gamma-api.polymarket.com/events?slug={slug}"
                     data = requests.get(url).json()
                     if data:
@@ -281,7 +282,7 @@ def search_with_exa_optimized(user_text):
                         
                         markets.append({
                             "title": data[0]['title'],
-                            "odds": f"Yes: {float(prices[0])*100:.1f}%", # Simplified
+                            "odds": f"Yes: {float(prices[0])*100:.1f}%",
                             "volume": float(m.get('volume',0)),
                             "slug": slug
                         })
@@ -432,58 +433,29 @@ if not st.session_state.messages:
                 st.info("Scanning global feeds...")
                 return
 
-            for idx, news in enumerate(latest_news):
-                # 计算相对时间
-                time_ago = f"{idx * 15 + 2}m ago" 
-                
-                with st.container():
-                    # 新闻卡片样式
-                    st.markdown(f"""
-                    <div style="
-                        padding: 12px 12px 5px 12px;
-                        margin-top: 12px;
-                        background: rgba(255, 255, 255, 0.03);
-                        border-left: 3px solid #ef4444;
-                        border-top-left-radius: 6px;
-                        border-top-right-radius: 6px;
-                    ">
-                        <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:#9ca3af; margin-bottom:4px;">
-                            <span style="font-weight:bold; color:#ef4444;">{news['source']}</span>
-                            <span>{time_ago}</span>
-                        </div>
-                        <div style="font-size:0.95rem; color:#e5e7eb; font-weight:500; line-height:1.4; margin-bottom:8px;">
-                            {news['title']}
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # 使用两列布局，左边是分析，右边是跳转
-                    b_col1, b_col2 = st.columns([1, 1], gap="small")
-                    
-                    with b_col1:
-                        # ⚡ 按钮 1: Be Holmes 分析 (功能按钮)
-                        # 🔥 FIX: 使用 hash(title) + idx 避免 DuplicateKeyError
-                        unique_key = f"btn_check_{hash(news['title'])}_{idx}"
-                        
-                        st.button(
-                            "⚡ Check Reality", 
-                            key=unique_key, 
-                            on_click=trigger_analysis, 
-                            args=(news['title'],),     
-                            use_container_width=True,
-                            type="primary"
-                        )
-                        
-                    with b_col2:
-                        # 🔗 按钮 2: 查看原文 (链接按钮)
-                        st.link_button(
-                            "🔗 Read Source", 
-                            url=news['link'],
-                            use_container_width=True
-                        )
-                    
-                    # 加一点间距，防止粘连
-                    st.markdown("<div style='margin-bottom: 8px;'></div>", unsafe_allow_html=True)
+            # 使用 Grid 布局 (每行2个)
+            rows = [latest_news[i:i+2] for i in range(0, len(latest_news), 2)]
+            
+            for row in rows:
+                cols = st.columns(2)
+                for i, news in enumerate(row):
+                    with cols[i]:
+                        with st.container():
+                            st.markdown(f"""
+                            <div class="news-grid-card">
+                                <div>
+                                    <div class="news-meta">
+                                        <span>{news['source']}</span>
+                                        <span style="color:#6b7280">LIVE</span>
+                                    </div>
+                                    <div class="news-body">
+                                        {news['title']}
+                                    </div>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            # 只有一个 Read Source 按钮
+                            st.link_button("🔗 Read Source", news['link'], use_container_width=True)
 
         # 调用这个局部刷新组件
         render_news_feed()
@@ -529,11 +501,10 @@ if not st.session_state.messages:
             st.info("Markets are relatively calm.")
 
 # ================= 📊 5. ANALYSIS RESULT VIEW =================
-# 当有对话历史时，隐藏上面的仪表盘，显示分析结果
 if st.session_state.messages:
     st.markdown("---")
     
-    # 顶部：Show context card if available
+    # Show context card if available
     if st.session_state.current_market:
         m = st.session_state.current_market
         st.markdown(f"""
@@ -547,15 +518,10 @@ if st.session_state.messages:
         </div>
         """, unsafe_allow_html=True)
 
-    # 显示 AI 回复
     for msg in st.session_state.messages:
         if msg['role'] == 'assistant':
-            # 尝试提取 JSON 里的 Alpha Gap
             text = msg['content']
-            
-            # 清理 JSON 以便显示
             display_text = re.sub(r'```json.*?```', '', text, flags=re.DOTALL)
-            
             st.markdown(f"""
             <div class="analysis-card">
                 <div style="font-family:'Inter'; line-height:1.6; color:#d1d5db;">
@@ -563,20 +529,15 @@ if st.session_state.messages:
                 </div>
             </div>
             """, unsafe_allow_html=True)
-            
-            # 可视化 Alpha Gap
             try:
                 json_match = re.search(r'```json\s*({.*?})\s*```', text, re.DOTALL)
                 if json_match and st.session_state.current_market:
                     data = json.loads(json_match.group(1))
                     ai_prob = data.get('ai_probability', 0.5)
-                    # 解析市场概率
                     m_prob_str = st.session_state.current_market['odds'].split(':')[-1].replace('%','').strip()
                     m_prob = float(m_prob_str)/100
-                    
                     gap = ai_prob - m_prob
                     color = "#ef4444" if abs(gap) > 0.2 else "#f59e0b"
-                    
                     st.markdown(f"""
                     <div style="margin-top:15px; padding:15px; background:rgba(0,0,0,0.3); border-radius:8px; border:1px solid {color};">
                         <div style="display:flex; justify-content:space-between; font-size:0.9rem; margin-bottom:5px;">
@@ -593,7 +554,31 @@ if st.session_state.messages:
                     """, unsafe_allow_html=True)
             except: pass
 
-    # 返回首页按钮
     if st.button("⬅️ Back to Dashboard"):
         st.session_state.messages = []
         st.rerun()
+
+# ================= 🌐 6. GLOBAL NEWS FOOTER =================
+if not st.session_state.messages:
+    st.markdown("---")
+    st.markdown('<div style="text-align:center; color:#9ca3af; margin-bottom:20px; letter-spacing:1px;">🌐 GLOBAL INTELLIGENCE HUB</div>', unsafe_allow_html=True)
+    
+    # 第一行：中文/亚洲源
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1: st.link_button("🇨🇳 Jin10 (金十)", "https://www.jin10.com/", use_container_width=True)
+    with c2: st.link_button("🇨🇳 WallstreetCN", "https://wallstreetcn.com/live/global", use_container_width=True)
+    with c3: st.link_button("🇸🇬 Zaobao", "https://www.zaobao.com.sg/realtime/world", use_container_width=True)
+    with c4: st.link_button("🇭🇰 SCMP", "https://www.scmp.com/", use_container_width=True)
+    with c5: st.link_button("🇯🇵 Nikkei Asia", "https://asia.nikkei.com/", use_container_width=True)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # 第二行：英文/全球源
+    d1, d2, d3, d4, d5 = st.columns(5)
+    with d1: st.link_button("🇺🇸 Bloomberg", "https://www.bloomberg.com/", use_container_width=True)
+    with d2: st.link_button("🇬🇧 Reuters", "https://www.reuters.com/", use_container_width=True)
+    with d3: st.link_button("🇺🇸 TechCrunch", "https://techcrunch.com/", use_container_width=True)
+    with d4: st.link_button("🪙 CoinDesk", "https://www.coindesk.com/", use_container_width=True)
+    with d5: st.link_button("🇶🇦 Al Jazeera", "https://www.aljazeera.com/", use_container_width=True)
+    
+    st.markdown("<br><br>", unsafe_allow_html=True)
