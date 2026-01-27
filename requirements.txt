@@ -1,4 +1,5 @@
-requests
+streamlit
 google-generativeai
-pandas
-exa_py
+exa-py
+feedparser
+requests
