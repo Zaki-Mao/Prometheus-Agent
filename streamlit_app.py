@@ -10,7 +10,7 @@ import random
 import urllib.parse
 
 # -----------------------------------------------------------------------------
-# 0. DEPENDENCY CHECK (Visual Error Handling)
+# 0. DEPENDENCY CHECK
 # -----------------------------------------------------------------------------
 try:
     import feedparser
@@ -76,7 +76,7 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
 
     .stApp {
-        background-image: linear-gradient(rgba(0, 0, 0, 0.9), rgba(20, 0, 0, 0.95)), 
+        background-image: linear-gradient(rgba(0, 0, 0, 0.92), rgba(20, 0, 0, 0.96)), 
                           url('https://upload.cc/i1/2026/01/20/s8pvXA.jpg');
         background-size: cover;
         background-position: center;
@@ -291,16 +291,41 @@ st.markdown("""
         letter-spacing: 0.5px;
     }
     .hub-btn:hover .hub-text { color: #ffffff; }
+    
+    /* Trend Tag */
+    .trend-container { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; }
+    .trend-tag {
+        background: rgba(220, 38, 38, 0.15);
+        color: #fca5a5;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        text-decoration: none;
+        border: 1px solid rgba(220, 38, 38, 0.3);
+        transition: all 0.2s;
+    }
+    .trend-tag:hover {
+        background: rgba(220, 38, 38, 0.3);
+        color: #ffffff;
+        transform: scale(1.05);
+    }
+    .trend-vol { margin-left: 6px; opacity: 0.7; font-size: 0.7rem; }
 </style>
 """, unsafe_allow_html=True)
 
 # ================= 🧠 5. LOGIC CORE =================
 
-# --- 🔥 A. MISSING FUNCTION: Fetch Crypto Prices (Fixes Web3 Loading) ---
+# --- 🔥 A. Crypto Prices (Extended List) ---
 @st.cache_data(ttl=60)
 def fetch_crypto_prices():
-    """获取主流加密货币实时价格（币安API）"""
-    symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "AVAXUSDT"]
+    """获取更多主流加密货币实时价格"""
+    # 扩充列表到 20 个，以填满左侧高度
+    symbols = [
+        "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", 
+        "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "TRXUSDT", "DOTUSDT", 
+        "LINKUSDT", "MATICUSDT", "LTCUSDT", "SHIBUSDT", "BCHUSDT", 
+        "ATOMUSDT", "UNIUSDT", "XLMUSDT", "ETCUSDT", "FILUSDT"
+    ]
     crypto_data = []
     
     try:
@@ -308,10 +333,12 @@ def fetch_crypto_prices():
         response = requests.get(url, timeout=5)
         
         if response.status_code == 200:
-            all_tickers = response.json()
-            for ticker in all_tickers:
-                if ticker['symbol'] in symbols:
-                    symbol_clean = ticker['symbol'].replace('USDT', '')
+            all_tickers = {t['symbol']: t for t in response.json()}
+            
+            for sym in symbols:
+                if sym in all_tickers:
+                    ticker = all_tickers[sym]
+                    symbol_clean = sym.replace('USDT', '')
                     price = float(ticker['lastPrice'])
                     change_24h = float(ticker['priceChangePercent'])
                     volume = float(ticker['volume'])
@@ -332,7 +359,7 @@ def fetch_crypto_prices():
                         "trend": "up" if change_24h > 0 else "down"
                     })
     except:
-        pass # Fail silently to fallback
+        pass 
 
     # Robust Fallback if API fails
     if not crypto_data:
@@ -343,20 +370,18 @@ def fetch_crypto_prices():
             {"symbol": "BNB", "price": "$612", "change": 0.8, "volume": "1.2B", "trend": "up"}
         ]
     
-    return crypto_data[:8]
+    return crypto_data
 
-# --- 🔥 B. MISSING FUNCTION: Categorized News Fetcher ---
+# --- 🔥 B. Categorized News Fetcher ---
 @st.cache_data(ttl=300)
 def fetch_categorized_news():
-    """获取分类新闻，只保留24小时内的"""
+    """获取分类新闻"""
     
-    # 辅助函数：通过RSS获取
-    def fetch_rss(url, limit=10):
+    def fetch_rss(url, limit=20):
         items = []
         try:
             feed = feedparser.parse(url)
             for entry in feed.entries[:limit]:
-                # 简单的时间处理
                 time_display = "Recent"
                 if hasattr(entry, 'published_parsed'):
                     try:
@@ -375,12 +400,11 @@ def fetch_categorized_news():
         except: pass
         return items
 
-    # 配置 RSS 源
     feeds = {
         "all": "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
         "politics": "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml",
         "tech": "https://techcrunch.com/feed/",
-        "web3": "https://www.coindesk.com/arc/outboundfeeds/rss/" # Crypto fallback
+        "web3": "https://www.coindesk.com/arc/outboundfeeds/rss/"
     }
     
     return {
@@ -390,7 +414,7 @@ def fetch_categorized_news():
         "web3": fetch_rss(feeds["web3"], 20)
     }
 
-# --- C. Other Helpers (Trends, Markets, AI) ---
+# --- C. Real-Time Trends ---
 @st.cache_data(ttl=1800)
 def fetch_real_trends():
     url = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"
@@ -400,17 +424,19 @@ def fetch_real_trends():
         response = requests.get(url, headers=headers, timeout=5)
         if response.status_code == 200:
             feed = feedparser.parse(response.content)
-            for entry in feed.entries[:20]:
+            for entry in feed.entries[:8]:
                 traffic = entry.ht_approx_traffic if hasattr(entry, 'ht_approx_traffic') else "Hot"
                 trends.append({"name": entry.title, "vol": traffic})
     except: pass
     if not trends: trends = [{"name": "Market", "vol": "1M+"}, {"name": "Tech", "vol": "500K+"}]
     return trends
 
+# --- 🔥 D. Polymarket - 交易量排序 + 比例修正 ---
 @st.cache_data(ttl=60)
 def fetch_top_polymarkets(sort_by="volume", limit=20):
     try:
-        url = "https://gamma-api.polymarket.com/events?limit=50&closed=false"
+        # 获取更多事件以进行过滤
+        url = "https://gamma-api.polymarket.com/events?limit=100&closed=false"
         resp = requests.get(url, timeout=5).json()
         markets = []
         if isinstance(resp, list):
@@ -418,19 +444,31 @@ def fetch_top_polymarkets(sort_by="volume", limit=20):
                 try:
                     m = event.get('markets', [])[0]
                     prices = json.loads(m.get('outcomePrices'))
+                    outcomes = json.loads(m.get('outcomes'))
                     vol = float(m.get('volume', 0))
-                    if len(prices) == 2:
-                        markets.append({
-                            "title": event.get('title'),
-                            "yes": int(float(prices[0])*100),
-                            "no": int(float(prices[1])*100),
-                            "slug": event.get('slug'),
-                            "volume": vol,
-                            "vol_str": f"${vol/1000000:.1f}M" if vol > 1000000 else f"${vol/1000:.0f}K"
-                        })
+                    
+                    # 严格筛选：必须有 Yes/No 且交易量 > 0
+                    if len(prices) == 2 and "Yes" in outcomes and "No" in outcomes and vol > 0:
+                        yes_idx = outcomes.index("Yes")
+                        no_idx = outcomes.index("No")
+                        
+                        yes_price = float(prices[yes_idx]) * 100
+                        no_price = float(prices[no_idx]) * 100
+                        
+                        # 数据清洗：确保总和大致为 100%，过滤异常死盘
+                        if 95 <= (yes_price + no_price) <= 105:
+                            markets.append({
+                                "title": event.get('title'),
+                                "yes": int(yes_price),
+                                "no": int(no_price),
+                                "slug": event.get('slug'),
+                                "volume": vol,
+                                "vol_str": f"${vol/1000000:.1f}M" if vol > 1000000 else f"${vol/1000:.0f}K"
+                            })
                 except: continue
         
-        if sort_by == "volume": markets.sort(key=lambda x: x['volume'], reverse=True)
+        # 强制按交易量降序，确保热门事件在顶部
+        markets.sort(key=lambda x: x['volume'], reverse=True)
         return markets[:limit]
     except: return []
 
@@ -501,10 +539,9 @@ if not st.session_state.messages:
                 st.session_state.news_category = c
                 st.rerun()
 
-        # 🔥 核心修改：使用 st.fragment 并修复缩进问题
+        # 🔥 核心修改：修复时区显示缩进问题
         @st.fragment(run_every=1)
         def render_news_feed():
-            # Time Zone Fix: Removed indentation to prevent code block rendering
             now_utc = datetime.datetime.now(datetime.timezone.utc)
             t_nyc = (now_utc - datetime.timedelta(hours=5)).strftime("%H:%M")
             t_lon = now_utc.strftime("%H:%M")
@@ -520,7 +557,7 @@ if not st.session_state.messages:
 </div>
 """, unsafe_allow_html=True)
 
-            # Web3 / News Logic
+            # Web3 (Crypto) Logic - 扩充到20个
             if st.session_state.news_category == "web3":
                 data = fetch_crypto_prices()
                 if data:
@@ -548,7 +585,8 @@ if not st.session_state.messages:
                 all_news = fetch_categorized_news()
                 news_list = all_news.get(st.session_state.news_category, all_news['all'])
                 if news_list:
-                    rows = [news_list[i:i+2] for i in range(0, min(len(news_list), 10), 2)]
+                    # 显示更多新闻以匹配高度
+                    rows = [news_list[i:i+2] for i in range(0, min(len(news_list), 20), 2)]
                     for row in rows:
                         cols = st.columns(2)
                         for i, news in enumerate(row):
@@ -566,9 +604,9 @@ if not st.session_state.messages:
 
         render_news_feed()
 
-    # === RIGHT: Polymarket ===
+    # === RIGHT: Polymarket (Top Volume Only) ===
     with col_markets:
-        st.markdown('<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid rgba(220,38,38,0.3); padding-bottom:8px;"><span style="font-size:0.9rem; font-weight:700; color:#ef4444;">💰 PREDICTION MARKETS</span></div>', unsafe_allow_html=True)
+        st.markdown('<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid rgba(220,38,38,0.3); padding-bottom:8px;"><span style="font-size:0.9rem; font-weight:700; color:#ef4444;">💰 PREDICTION MARKETS (TOP VOLUME)</span></div>', unsafe_allow_html=True)
         
         # Sort Buttons
         sc1, sc2 = st.columns(2)
