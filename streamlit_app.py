@@ -501,7 +501,7 @@ def process_polymarket_event(event):
 def fetch_polymarket_v5_simple(limit=60):
     """Fetch Top Markets for Homepage"""
     try:
-        url = "https://gamma-api.polymarket.com/events?limit=200&closed=false"
+        url = "https://gamma-api.polymarket.com/events?limit=100&closed=false"
         resp = requests.get(url, timeout=8).json()
         markets = []
         
@@ -525,7 +525,7 @@ def search_market_data_list(user_query):
         
         search_resp = exa.search(
             f"site:polymarket.com {keywords}",
-            num_results=15, 
+            num_results=25, # Increased search depth
             type="neural",
             include_domains=["polymarket.com"]
         )
@@ -546,7 +546,7 @@ def search_market_data_list(user_query):
                     if market_data:
                         candidates.append(market_data)
     except: pass
-    return candidates[:10]
+    return candidates # No limit, return all found
 
 # --- 🔥 D. AGENT LOGIC ---
 def generate_keywords(user_text):
@@ -703,6 +703,7 @@ with s_mid:
         st.session_state.search_candidates = []
         
     input_val = st.session_state.get("user_news_text", "")
+    # Use a unique key for the text area to allow programmatic clearing if needed, though we sync state
     user_query = st.text_area("Analyze News", value=input_val, height=70, 
                               placeholder="Paste a headline (e.g., 'Unitree robot on Spring Festival Gala')...", 
                               label_visibility="collapsed",
@@ -724,11 +725,20 @@ with s_mid:
         st.markdown("##### 🧐 Select a Market to Reality Check:")
         if st.session_state.search_candidates:
             for idx, m in enumerate(st.session_state.search_candidates):
-                c1, c2 = st.columns([4, 1])
-                with c1:
-                    st.info(f"**{m['title']}**\n\nOdds: {m['odds']} (Vol: {m['vol_str']})")
-                with c2:
-                    if st.button("Analyze", key=f"btn_{idx}", use_container_width=True):
+                # Native Container with Styling
+                with st.container():
+                    st.markdown(f"""
+                    <div style="padding:12px; background:rgba(255,255,255,0.03); border-radius:8px; border:1px solid rgba(255,255,255,0.1); margin-bottom:10px;">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                            <div style="flex:1;">
+                                <div style="font-weight:700; font-size:1rem; color:#e5e7eb;">{m['title']}</div>
+                                <div style="font-size:0.8rem; color:#9ca3af; margin-top:4px;">{m['odds']}</div>
+                                <div style="font-size:0.75rem; color:#6b7280; font-family:'JetBrains Mono'; margin-top:4px;">Vol: {m['vol_str']}</div>
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    if st.button("Analyze This", key=f"btn_{idx}", use_container_width=True):
                         st.session_state.current_market = m
                         st.session_state.search_stage = "analysis"
                         st.session_state.messages = [{"role": "user", "content": f"Analyze this news: {st.session_state.user_news_text}"}]
@@ -762,87 +772,45 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
     
     if st.session_state.current_market:
         m = st.session_state.current_market
-        # 1. 标题卡片
-        st.markdown(f"""
-        <div style="background:rgba(20,0,0,0.8); border-left:4px solid #ef4444; padding:15px; border-radius:8px; margin-bottom:10px;">
-            <div style="font-size:0.8rem; color:#9ca3af; text-transform:uppercase;">🎯 Selected Prediction Market Event</div>
-            <div style="font-size:1.2rem; color:#e5e7eb; font-weight:bold; margin-top:5px; margin-bottom:15px;">{m['title']}</div>
-            <div style="display:flex; gap:15px; margin-bottom:15px; padding:10px; background:rgba(255,255,255,0.05); border-radius:6px;">
-                <div>
-                    <div style="font-size:0.7rem; color:#9ca3af;">Total Volume</div>
-                    <div style="font-size:1rem; color:#fbbf24; font-weight:700; font-family:'JetBrains Mono';">${m['volume']:,.0f}</div>
-                </div>
-                <div>
-                    <div style="font-size:0.7rem; color:#9ca3af;">Sub-Markets</div>
-                    <div style="font-size:1rem; color:#10b981; font-weight:700; font-family:'JetBrains Mono';">{len(m.get('markets', []))}</div>
-                </div>
+        
+        # 1. Market Header (Native Metric Lookalike)
+        with st.container():
+            st.markdown(f"""
+            <div style="background:rgba(20,0,0,0.8); border-left:4px solid #ef4444; padding:15px; border-radius:8px; margin-bottom:15px;">
+                <div style="font-size:0.8rem; color:#9ca3af; text-transform:uppercase; letter-spacing:1px;">🎯 Selected Market</div>
+                <div style="font-size:1.4rem; color:#ffffff; font-weight:800; margin:5px 0;">{m['title']}</div>
+                <div style="font-family:'JetBrains Mono'; color:#ef4444; font-size:1rem;">{m['vol_str']} Volume</div>
+                <a href="{m['url']}" target="_blank" style="display:inline-block; margin-top:10px; color:#fca5a5; font-size:0.8rem; text-decoration:none;">🔗 Open on Polymarket</a>
             </div>
-            <div style="font-size:0.8rem; color:#ef4444; font-weight:600; margin-bottom:10px; text-transform:uppercase;">Market Details:</div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-        # 2. 子市场列表循环 (Clean HTML generation)
+        # 2. Sub-Markets Loop (Native Streamlit)
+        st.markdown("##### 📊 Sub-Market Details")
         for idx, market in enumerate(m.get('markets', []), 1):
-            if market['type'] == 'binary':
-                html_block = textwrap.dedent(f"""
-                <div style="background:rgba(255,255,255,0.03); padding:10px; border-radius:6px; margin-bottom:8px; border-left:3px solid #ef4444;">
-                    <div style="font-size:0.85rem; color:#e5e7eb; font-weight:600; margin-bottom:6px;">{idx}. {market['question']}</div>
-                    <div style="display:flex; gap:10px;">
-                        <div style="flex:1; background:rgba(16,185,129,0.1); padding:6px; border-radius:4px; border:1px solid rgba(16,185,129,0.2);">
-                            <span style="font-size:0.7rem; color:#9ca3af;">Yes</span>
-                            <span style="font-size:0.95rem; color:#10b981; font-weight:700; font-family:'JetBrains Mono'; margin-left:8px;">{market['yes_price']:.1f}%</span>
-                        </div>
-                        <div style="flex:1; background:rgba(239,68,68,0.1); padding:6px; border-radius:4px; border:1px solid rgba(239,68,68,0.2);">
-                            <span style="font-size:0.7rem; color:#9ca3af;">No</span>
-                            <span style="font-size:0.95rem; color:#ef4444; font-weight:700; font-family:'JetBrains Mono'; margin-left:8px;">{market['no_price']:.1f}%</span>
-                        </div>
-                    </div>
-                    <div style="font-size:0.7rem; color:#6b7280; margin-top:4px; text-align:right;">Vol: ${market['volume']:,.0f}</div>
-                </div>
-                """)
-                st.markdown(html_block, unsafe_allow_html=True)
-            else:
-                options_str = ""
-                try:
-                    sorted_opts = sorted(market.get('options', []), key=lambda x: x.get('price', 0), reverse=True)[:5]
-                except: sorted_opts = []
+            with st.container():
+                st.markdown(f"**{idx}. {market['question']}**")
                 
-                for opt in sorted_opts:
-                    bar_width = min(opt['price'], 100)
-                    options_str += textwrap.dedent(f"""
-                    <div style="margin-bottom:4px;">
-                        <div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-bottom:2px;">
-                            <span style="color:#e5e7eb;">{opt['option']}</span>
-                            <span style="color:#fbbf24; font-weight:700; font-family:'JetBrains Mono';">{opt['price']:.1f}%</span>
-                        </div>
-                        <div style="background:rgba(255,255,255,0.1); height:4px; border-radius:2px; overflow:hidden;">
-                            <div style="background:#fbbf24; height:100%; width:{bar_width}%;"></div>
-                        </div>
-                    </div>
-                    """)
-                
-                html_block = textwrap.dedent(f"""
-                <div style="background:rgba(255,255,255,0.03); padding:10px; border-radius:6px; margin-bottom:8px; border-left:3px solid #fbbf24;">
-                    <div style="font-size:0.85rem; color:#e5e7eb; font-weight:600; margin-bottom:8px;">{idx}. {market['question']}</div>
-                    {options_str}
-                    <div style="font-size:0.7rem; color:#6b7280; margin-top:6px; text-align:right;">Vol: ${market['volume']:,.0f}</div>
-                </div>
-                """)
-                st.markdown(html_block, unsafe_allow_html=True)
-
-        # 3. 底部链接
-        st.markdown(f"""
-        <div style="background:rgba(20,0,0,0.8); border-left:4px solid #ef4444; padding:0 15px 15px 15px; border-bottom-left-radius:8px; border-bottom-right-radius:8px; margin-top:-20px; margin-bottom:20px;">
-             <a href="{m['url']}" target="_blank" style="display:inline-block; margin-top:10px; color:#fca5a5; font-size:0.8rem; text-decoration:none;">🔗 View on Polymarket</a>
-        </div>
-        """, unsafe_allow_html=True)
+                if market['type'] == 'binary':
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.progress(market['yes_price'] / 100)
+                        st.caption(f"Yes: {market['yes_price']:.1f}%")
+                    with c2:
+                        st.progress(market['no_price'] / 100)
+                        st.caption(f"No: {market['no_price']:.1f}%")
+                else:
+                    sorted_opts = sorted(market.get('options', []), key=lambda x: x.get('price', 0), reverse=True)[:3]
+                    for opt in sorted_opts:
+                        c1, c2 = st.columns([1, 4])
+                        with c1:
+                            st.write(f"{opt['price']:.1f}%")
+                        with c2:
+                            st.progress(min(opt['price'] / 100, 1.0))
+                            st.caption(opt['option'])
+                st.divider()
 
     else:
-        st.markdown("""
-        <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:8px; margin-bottom:20px; text-align:center; color:#6b7280; font-size:0.8rem;">
-            🤖 Pure AI Analysis (No Market Data Selected)
-        </div>
-        """, unsafe_allow_html=True)
+        st.info("🤖 Pure AI Analysis (No Market Data Selected)")
 
     # Chat History
     for msg in st.session_state.messages:
