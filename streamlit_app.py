@@ -292,27 +292,27 @@ st.markdown("""
     }
     .hub-btn:hover .hub-text { color: #ffffff; }
     
-    /* Trend Tags (Fixed Buttons) */
-    .trend-container { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; }
-    .trend-btn {
-        background: rgba(220, 38, 38, 0.15);
-        color: #fca5a5;
-        padding: 6px 14px;
-        border-radius: 6px;
-        font-size: 0.8rem;
-        text-decoration: none;
+    /* Global Trends Buttons (Fixed) */
+    .trend-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; justify-content: flex-start; }
+    .trend-fixed-btn {
+        background: rgba(220, 38, 38, 0.1);
         border: 1px solid rgba(220, 38, 38, 0.3);
-        transition: all 0.2s;
+        color: #fca5a5;
+        padding: 8px 16px;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        text-decoration: none;
         display: flex;
         align-items: center;
-        gap: 6px;
-        font-weight: 600;
+        gap: 8px;
+        transition: all 0.2s;
     }
-    .trend-btn:hover {
+    .trend-fixed-btn:hover {
         background: rgba(220, 38, 38, 0.4);
-        color: #ffffff;
+        color: white;
         border-color: #ef4444;
-        transform: scale(1.02);
+        transform: translateY(-2px);
     }
     .ex-link {
         font-size: 0.7rem; color: #6b7280; text-decoration: none; margin-top: 5px; display: block; text-align: right;
@@ -323,16 +323,18 @@ st.markdown("""
 
 # ================= 🧠 5. LOGIC CORE =================
 
-# --- 🔥 A. Crypto Prices (Massively Expanded) ---
+# --- 🔥 A. Crypto Prices (Massively Expanded to 24 items) ---
+# Renamed function to force cache refresh
 @st.cache_data(ttl=60)
-def fetch_crypto_prices():
+def fetch_crypto_prices_v2():
     """获取更多主流加密货币实时价格"""
-    # 扩充监控列表
+    # 扩充监控列表至 24 个，确保列表够长
     symbols = [
         "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", 
         "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "SHIBUSDT", "DOTUSDT", 
         "LINKUSDT", "TRXUSDT", "MATICUSDT", "LTCUSDT", "BCHUSDT", 
-        "UNIUSDT"
+        "UNIUSDT", "NEARUSDT", "APTUSDT", "FILUSDT", "ICPUSDT",
+        "PEPEUSDT", "WIFUSDT", "SUIUSDT", "FETUSDT"
     ]
     crypto_data = []
     
@@ -381,8 +383,9 @@ def fetch_crypto_prices():
     return crypto_data
 
 # --- 🔥 B. Categorized News Fetcher ---
+# Renamed function to force cache refresh
 @st.cache_data(ttl=300)
-def fetch_categorized_news():
+def fetch_categorized_news_v2():
     """获取分类新闻"""
     
     def fetch_rss(url, limit=20):
@@ -422,9 +425,10 @@ def fetch_categorized_news():
         "web3": fetch_rss(feeds["web3"], 20)
     }
 
-# --- 🔥 D. Polymarket - 严格数据清洗 (Yes/No Only) ---
+# --- 🔥 D. Polymarket - 严格数据清洗 (Fix Mismatch) ---
+# Renamed function to force cache refresh
 @st.cache_data(ttl=60)
-def fetch_top_polymarkets(sort_by="volume", limit=20):
+def fetch_polymarket_v2(sort_by="volume", limit=20):
     try:
         # 获取更多事件以进行过滤
         url = "https://gamma-api.polymarket.com/events?limit=100&closed=false"
@@ -433,23 +437,41 @@ def fetch_top_polymarkets(sort_by="volume", limit=20):
         if isinstance(resp, list):
             for event in resp:
                 try:
-                    m = event.get('markets', [])[0]
+                    # 获取第一个市场
+                    if not event.get('markets'): continue
+                    m = event['markets'][0]
                     
-                    # 1. 检查 Outcome 是否是纯粹的 ["Yes", "No"]
-                    # 很多市场是多选项(Categorical)，这会导致数据错位，必须过滤
+                    # 1. 严格过滤：必须是 Yes/No 二元市场
+                    # Polymarket API 返回的 outcomes 字符串可能是 '["Yes", "No"]' 或 '["Trump", "Biden", ...]'
                     outcomes_raw = m.get('outcomes')
-                    outcomes = json.loads(outcomes_raw) if isinstance(outcomes_raw, str) else outcomes_raw
-                    
-                    if outcomes != ["Yes", "No"]:
-                        continue # 跳过非二元市场，保证数据准确
+                    # 安全解析 JSON
+                    if isinstance(outcomes_raw, str):
+                        try: outcomes = json.loads(outcomes_raw)
+                        except: continue
+                    else:
+                        outcomes = outcomes_raw
+                        
+                    # 只有 outcomes 是 ["Yes", "No"] 或者是 ["No", "Yes"] 时才保留 (通常是 Yes/No)
+                    # 很多赛事冠军预测 outcomes 是队伍名，这种必须踢掉，否则 Yes/No 价格会对应成 队伍A/队伍B 的价格，导致数据"对不上"
+                    if not outcomes or "Yes" not in outcomes or "No" not in outcomes:
+                        continue
                         
                     prices_raw = m.get('outcomePrices')
-                    prices = json.loads(prices_raw) if isinstance(prices_raw, str) else prices_raw
+                    if isinstance(prices_raw, str):
+                        try: prices = json.loads(prices_raw)
+                        except: continue
+                    else:
+                        prices = prices_raw
+                        
                     vol = float(m.get('volume', 0))
                     
-                    if len(prices) == 2 and vol > 0:
-                        yes_price = float(prices[0]) * 100
-                        no_price = float(prices[1]) * 100
+                    # 确保价格和选项对应
+                    if len(prices) == len(outcomes) and vol > 0:
+                        yes_idx = outcomes.index("Yes")
+                        no_idx = outcomes.index("No")
+                        
+                        yes_price = float(prices[yes_idx]) * 100
+                        no_price = float(prices[no_idx]) * 100
                         
                         # 2. 再次校验价格合理性 (防止死盘)
                         if 95 <= (yes_price + no_price) <= 105:
@@ -517,14 +539,14 @@ if not st.session_state.messages:
         </div>
         """, unsafe_allow_html=True)
 
-        # 🔥 Global Trends Buttons (Fixed Static Links)
+        # 🔥 FIXED: Global Trends Buttons (Static Links)
         trend_html = """
-        <div class="trend-container">
-            <a href="https://trends.google.com/trending?geo=US" target="_blank" class="trend-btn">📈 Google Trends</a>
-            <a href="https://twitter.com/explore/tabs/trending" target="_blank" class="trend-btn">🐦 Twitter Trends</a>
-            <a href="https://www.jin10.com/" target="_blank" class="trend-btn">⚡ Jin10 Data</a>
-            <a href="https://www.bloomberg.com/trending" target="_blank" class="trend-btn">📊 Bloomberg</a>
-            <a href="https://www.reddit.com/r/all/" target="_blank" class="trend-btn">🤖 Reddit</a>
+        <div class="trend-row">
+            <a href="https://trends.google.com/trending?geo=US" target="_blank" class="trend-fixed-btn">📈 Google Trends</a>
+            <a href="https://twitter.com/explore/tabs/trending" target="_blank" class="trend-fixed-btn">🐦 Twitter Trends</a>
+            <a href="https://www.jin10.com/" target="_blank" class="trend-fixed-btn">⚡ Jin10 Data</a>
+            <a href="https://www.bloomberg.com/" target="_blank" class="trend-fixed-btn">📊 Bloomberg</a>
+            <a href="https://www.reddit.com/r/all/" target="_blank" class="trend-fixed-btn">🤖 Reddit</a>
         </div>
         """
         st.markdown(trend_html, unsafe_allow_html=True)
@@ -556,9 +578,9 @@ if not st.session_state.messages:
 </div>
 """, unsafe_allow_html=True)
 
-            # Web3 (Crypto) Logic - 扩充到16个以上
+            # Web3 (Crypto) Logic - 🔥 Expanded to 24 items
             if st.session_state.news_category == "web3":
-                data = fetch_crypto_prices()
+                data = fetch_crypto_prices_v2()
                 if data:
                     rows = [data[i:i+2] for i in range(0, len(data), 2)]
                     for row in rows:
@@ -566,17 +588,14 @@ if not st.session_state.messages:
                         for i, coin in enumerate(row):
                             color = "#10b981" if coin['trend'] == "up" else "#ef4444"
                             cols[i].markdown(f"""
-                            <div style="background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.1); border-left:3px solid {color}; border-radius:8px; padding:15px; margin-bottom:10px;">
-                                <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
-                                    <span style="color:#e5e7eb; font-weight:700;">{coin['symbol']}</span>
-                                    <span style="color:{color};">{coin['change']:.2f}%</span>
+                            <div style="background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.1); border-left:3px solid {color}; border-radius:8px; padding:12px; margin-bottom:8px;">
+                                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                                    <span style="color:#e5e7eb; font-weight:700; font-size:0.9rem;">{coin['symbol']}</span>
+                                    <span style="color:{color}; font-size:0.85rem;">{coin['change']:.2f}%</span>
                                 </div>
-                                <div style="display:flex; justify-content:space-between;">
-                                    <span style="color:#fbbf24; font-weight:700; font-family:'JetBrains Mono';">{coin['price']}</span>
-                                    <span style="color:#9ca3af; font-size:0.8rem;">Vol: {coin['volume']}</span>
-                                </div>
-                                <div style="margin-top:8px; text-align:right;">
-                                    <a href="https://www.binance.com/en/trade/{coin['symbol']}_USDT" target="_blank" style="text-decoration:none; color:#ef4444; font-size:0.7rem;">Trade →</a>
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <span style="color:#fbbf24; font-weight:700; font-family:'JetBrains Mono'; font-size:1rem;">{coin['price']}</span>
+                                    <a href="https://www.binance.com/en/trade/{coin['symbol']}_USDT" target="_blank" style="color:#ef4444; font-size:0.7rem; text-decoration:none; border:1px solid rgba(220,38,38,0.3); padding:2px 6px; border-radius:4px;">Trade</a>
                                 </div>
                             </div>
                             """, unsafe_allow_html=True)
@@ -584,10 +603,10 @@ if not st.session_state.messages:
                     st.info("Loading crypto data...")
             else:
                 # News Logic
-                all_news = fetch_categorized_news()
+                all_news = fetch_categorized_news_v2()
                 news_list = all_news.get(st.session_state.news_category, all_news['all'])
                 if news_list:
-                    rows = [news_list[i:i+2] for i in range(0, min(len(news_list), 20), 2)]
+                    rows = [news_list[i:i+2] for i in range(0, min(len(news_list), 24), 2)] # Show 24 items
                     for row in rows:
                         cols = st.columns(2)
                         for i, news in enumerate(row):
@@ -614,7 +633,9 @@ if not st.session_state.messages:
         if sc1.button("💵 Volume", use_container_width=True): st.session_state.market_sort = "volume"
         if sc2.button("🔥 Activity", use_container_width=True): st.session_state.market_sort = "active"
         
-        markets = fetch_top_polymarkets(st.session_state.market_sort, 20)
+        # Use V2 fetcher with Strict Yes/No Filter
+        markets = fetch_polymarket_v2(st.session_state.market_sort, 20)
+        
         if markets:
             rows = [markets[i:i+2] for i in range(0, len(markets), 2)]
             for row in rows:
