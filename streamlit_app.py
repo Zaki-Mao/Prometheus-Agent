@@ -11,6 +11,7 @@ import random
 import urllib.parse
 
 # ================= 🔐 0. KEY MANAGEMENT =================
+# 务必在 Streamlit secrets 中配置 NEWS_API_KEY
 try:
     EXA_API_KEY = st.secrets.get("EXA_API_KEY", None)
     GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", None)
@@ -158,23 +159,66 @@ st.markdown("""
         overflow: hidden;
     }
     
-    /* Market Spectrum Styles */
-    .market-mini-card {
-        padding: 10px;
-        margin-bottom: 8px;
+    /* 🔥 New Polymarket Card Style */
+    .market-card-modern {
         background: rgba(255, 255, 255, 0.02);
         border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 6px;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 10px;
         transition: all 0.2s;
     }
-    .market-mini-card:hover {
+    .market-card-modern:hover {
         border-color: #ef4444;
-        background: rgba(40, 0, 0, 0.5);
+        background: rgba(40, 0, 0, 0.3);
     }
-    .market-title { font-size: 0.85rem; color: #e5e7eb; margin-bottom: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .market-bar-bg { height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; }
-    .market-bar-fill { height: 100%; border-radius: 2px; }
-    .market-meta { display: flex; justify-content: space-between; font-size: 0.75rem; margin-top: 4px; color: #9ca3af; }
+    .market-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 10px;
+    }
+    .market-title-mod {
+        font-size: 0.85rem;
+        color: #e5e7eb;
+        font-weight: 600;
+        line-height: 1.3;
+        flex: 1;
+        margin-right: 10px;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    .market-vol {
+        font-size: 0.7rem;
+        color: #9ca3af;
+        white-space: nowrap;
+        background: rgba(255,255,255,0.05);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-family: 'JetBrains Mono', monospace;
+    }
+    .outcome-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+    }
+    .outcome-box {
+        flex: 1;
+        padding: 8px;
+        border-radius: 6px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-family: 'JetBrains Mono', monospace;
+    }
+    .outcome-box.yes { background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); }
+    .outcome-box.no { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); }
+    .outcome-label { font-size: 0.75rem; font-weight: 600; }
+    .outcome-price { font-size: 1rem; font-weight: 700; }
+    .yes-color { color: #10b981; }
+    .no-color { color: #ef4444; }
 
     /* Input Area */
     .stTextArea textarea {
@@ -229,7 +273,7 @@ st.markdown("""
         box-shadow: 0 0 10px #ef4444;
     }
 
-    /* 🔥🔥 NEW: Hub Button Styles (CSS for HTML buttons) 🔥🔥 */
+    /* Hub Button Styles */
     .hub-btn {
         display: flex;
         flex-direction: column;
@@ -315,21 +359,25 @@ def fetch_news():
     # 1. 尝试使用 NewsAPI (如果 Key 存在)
     if NEWS_API_KEY:
         try:
-            url = f"https://newsapi.org/v2/top-headlines?category=business&language=en&pageSize=40&apiKey={NEWS_API_KEY}"
-            response = requests.get(url, timeout=5)
+            # 使用更广泛的参数: general category, language en, no country restricted
+            url = f"https://newsapi.org/v2/top-headlines?category=general&language=en&pageSize=40&apiKey={NEWS_API_KEY}"
+            response = requests.get(url, timeout=10)
             data = response.json()
             
             if data.get("status") == "ok":
                 for article in data.get("articles", []):
-                    if article['title'] == "[Removed]": continue
+                    if article['title'] == "[Removed]" or not article['title'] or not article['url']: continue
                     
-                    # 时间计算
+                    # 时间计算 (统一使用 UTC)
                     time_display = "LIVE"
                     pub_time = article.get('publishedAt')
                     if pub_time:
                         try:
                             dt = datetime.datetime.strptime(pub_time, "%Y-%m-%dT%H:%M:%SZ")
-                            diff = datetime.datetime.utcnow() - dt
+                            # dt 是 naive 的 UTC 时间，设定为 UTC tzinfo
+                            dt = dt.replace(tzinfo=datetime.timezone.utc)
+                            diff = datetime.datetime.now(datetime.timezone.utc) - dt
+                            
                             if diff.total_seconds() < 3600:
                                 time_display = f"{int(diff.total_seconds()/60)}m ago"
                             else:
@@ -338,26 +386,30 @@ def fetch_news():
 
                     news_items.append({
                         "title": article['title'],
-                        "source": article['source']['name'],
+                        "source": article['source']['name'] or "NewsAPI",
                         "link": article['url'],
                         "time": time_display
                     })
-        except:
-            pass # Fail silently to fallback
+        except Exception as e:
+            # API 调用失败，准备 fallback
+            pass
 
     # 2. 如果 NewsAPI 失败或没 Key，使用 Google News RSS (绝对实时)
     if not news_items:
-        # Google News RSS (Global Business)
-        rss_url = "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWvfSkwyMHZNRGx6TVdZU0FtdHZHZ0pMVWlnQVAB?hl=en-US&gl=US&ceid=US%3Aen"
+        # Google News RSS (Global English)
+        rss_url = "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"
         try:
             feed = feedparser.parse(rss_url)
-            for entry in feed.entries[:30]:
+            for entry in feed.entries[:40]:
                 # 解析时间
                 time_display = "LIVE"
                 if hasattr(entry, 'published_parsed'):
                     try:
-                        dt = datetime.datetime.fromtimestamp(time.mktime(entry.published_parsed))
-                        diff = datetime.datetime.now() - dt
+                        # published_parsed 是 UTC 时间元组
+                        dt_utc = datetime.datetime.fromtimestamp(time.mktime(entry.published_parsed), datetime.timezone.utc)
+                        now_utc = datetime.datetime.now(datetime.timezone.utc)
+                        diff = now_utc - dt_utc
+                        
                         if diff.total_seconds() < 3600:
                             time_display = f"{int(diff.total_seconds()/60)}m ago"
                         else:
@@ -400,11 +452,11 @@ def fetch_real_trends():
         trends = [{"name": "Market", "vol": "2M+"}, {"name": "Tech", "vol": "1M+"}]
     return trends
 
-# --- C. Market Logic (Categorized) ---
+# --- 🔥 C. Market Logic (New Card Data Fetching) ---
 @st.cache_data(ttl=60)
 def fetch_categorized_markets():
     try:
-        url = "https://gamma-api.polymarket.com/events?limit=20&sort=volume&closed=false"
+        url = "https://gamma-api.polymarket.com/events?limit=30&sort=volume&closed=false"
         resp = requests.get(url, timeout=5).json()
         
         categories = {"consensus": [], "battleground": []}
@@ -415,28 +467,54 @@ def fetch_categorized_markets():
                     m = event.get('markets', [])[0]
                     outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
                     prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
+                    volume = float(m.get('volume', 0))
                     
                     yes_price = 0
-                    if "Yes" in outcomes:
-                        yes_price = float(prices[outcomes.index("Yes")]) * 100
-                    else:
-                        yes_price = float(max([float(x) for x in prices])) * 100 
+                    no_price = 0
                     
+                    # 尝试找到 Yes 和 No 的价格
+                    if "Yes" in outcomes and "No" in outcomes:
+                        yes_idx = outcomes.index("Yes")
+                        no_idx = outcomes.index("No")
+                        yes_price = float(prices[yes_idx]) * 100
+                        no_price = float(prices[no_idx]) * 100
+                    elif len(outcomes) == 2 and len(prices) == 2:
+                        # 对于只有两个选项的市场，假设第一个是 Yes/Long，第二个是 No/Short
+                        yes_price = float(prices[0]) * 100
+                        no_price = float(prices[1]) * 100
+                    else:
+                        # 跳过多选项市场，保持界面简洁
+                        continue
+
                     market_obj = {
                         "title": event.get('title'),
                         "yes": int(yes_price),
-                        "slug": event.get('slug')
+                        "no": int(no_price),
+                        "slug": event.get('slug'),
+                        "volume": volume
                     }
                     
-                    if yes_price >= 75 or yes_price <= 25:
+                    # 分类逻辑
+                    if yes_price >= 80 or yes_price <= 20:
                         categories["consensus"].append(market_obj)
-                    elif 40 <= yes_price <= 60:
+                    elif 40 <= yes_price <= 60 and volume > 10000: # 只展示有一定交易量的战场
                         categories["battleground"].append(market_obj)
                         
                 except: continue
+        
+        # 格式化交易量显示
+        def format_vol(vol):
+            if vol >= 1000000: return f"${vol/1000000:.1f}M"
+            if vol >= 1000: return f"${vol/1000:.0f}K"
+            return f"${vol:.0f}"
+            
+        for cat in categories:
+            for m in categories[cat]:
+                m['vol_str'] = format_vol(m['volume'])
+
         return {
-            "consensus": categories["consensus"][:4], 
-            "battleground": categories["battleground"][:4]
+            "consensus": categories["consensus"][:5], 
+            "battleground": categories["battleground"][:5]
         }
     except: return {"consensus": [], "battleground": []}
 
@@ -710,22 +788,33 @@ if not st.session_state.messages:
 
         render_news_feed()
 
-    # === RIGHT: The Truth Spectrum ===
+    # === RIGHT: The Truth Spectrum (NEW DESIGN) ===
     with col_markets:
         st.markdown('<div class="section-header"><span style="color:#ef4444">💰 Market Consensus</span> <span style="font-size:0.7rem; opacity:0.7">POLYMARKET</span></div>', unsafe_allow_html=True)
         
         market_cats = fetch_categorized_markets()
         
         # 1. Consensus Area
-        st.caption("🏛️ High Certainty (Market Consensus)")
+        st.caption("🏛️ High Certainty (Consensus)")
         if market_cats['consensus']:
             for m in market_cats['consensus']:
                 st.markdown(f"""
                 <a href="https://polymarket.com/event/{m['slug']}" target="_blank" style="text-decoration:none;">
-                    <div class="market-mini-card">
-                        <div class="market-title">{m['title']}</div>
-                        <div class="market-bar-bg"><div class="market-bar-fill" style="width:{m['yes']}%; background:#10b981;"></div></div>
-                        <div class="market-meta"><span>Likelihood</span> <span>{m['yes']}%</span></div>
+                    <div class="market-card-modern">
+                        <div class="market-head">
+                            <div class="market-title-mod">{m['title']}</div>
+                            <div class="market-vol">Vol: {m['vol_str']}</div>
+                        </div>
+                        <div class="outcome-row">
+                            <div class="outcome-box yes">
+                                <span class="outcome-label yes-color">YES</span>
+                                <span class="outcome-price yes-color">{m['yes']}%</span>
+                            </div>
+                            <div class="outcome-box no">
+                                <span class="outcome-label no-color">NO</span>
+                                <span class="outcome-price no-color">{m['no']}%</span>
+                            </div>
+                        </div>
                     </div>
                 </a>
                 """, unsafe_allow_html=True)
@@ -735,15 +824,26 @@ if not st.session_state.messages:
         st.markdown("<br>", unsafe_allow_html=True)
         
         # 2. Battleground Area
-        st.caption("⚡ Active Battleground (High Uncertainty)")
+        st.caption("⚡ Active Battleground (Uncertain)")
         if market_cats['battleground']:
             for m in market_cats['battleground']:
                 st.markdown(f"""
                 <a href="https://polymarket.com/event/{m['slug']}" target="_blank" style="text-decoration:none;">
-                    <div class="market-mini-card battleground">
-                        <div class="market-title">{m['title']}</div>
-                        <div class="market-bar-bg"><div class="market-bar-fill" style="width:{m['yes']}%; background:#f59e0b;"></div></div>
-                        <div class="market-meta"><span>Likelihood</span> <span>{m['yes']}%</span></div>
+                    <div class="market-card-modern">
+                        <div class="market-head">
+                            <div class="market-title-mod">{m['title']}</div>
+                            <div class="market-vol">Vol: {m['vol_str']}</div>
+                        </div>
+                        <div class="outcome-row">
+                            <div class="outcome-box yes">
+                                <span class="outcome-label yes-color">YES</span>
+                                <span class="outcome-price yes-color">{m['yes']}%</span>
+                            </div>
+                            <div class="outcome-box no">
+                                <span class="outcome-label no-color">NO</span>
+                                <span class="outcome-price no-color">{m['no']}%</span>
+                            </div>
+                        </div>
                     </div>
                 </a>
                 """, unsafe_allow_html=True)
@@ -823,7 +923,6 @@ if not st.session_state.messages:
     
     trend_html = '<div class="trend-container">'
     for t in real_trends:
-        # 关键修复：加了 target="_blank" 和 URL 编码
         encoded_query = urllib.parse.quote(t['name'])
         trend_html += f"""
         <a href="https://www.google.com/search?q={encoded_query}" target="_blank" class="trend-tag">
@@ -852,7 +951,6 @@ if not st.session_state.messages:
         {"name": "Al Jazeera", "url": "https://www.aljazeera.com/", "icon": "🇶🇦"},
     ]
     
-    # 使用 Streamlit 原生 Columns 循环生成
     rows = [hub_links[i:i+5] for i in range(0, len(hub_links), 5)]
     
     for row in rows:
