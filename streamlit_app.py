@@ -55,6 +55,13 @@ for key, value in default_state.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
+# --- 🟢 处理点击新闻的回调函数 ---
+def trigger_analysis(news_title):
+    st.session_state.user_news_text = news_title
+    st.session_state.show_market_selection = False
+    st.session_state.current_market = None
+    st.session_state.is_processing = False 
+
 # ================= 🎨 2. UI THEME (CSS) =================
 st.markdown("""
 <style>
@@ -190,7 +197,7 @@ st.markdown("""
 
 # ================= 🧠 3. LOGIC CORE =================
 
-# --- A. News Logic ---
+# --- A. News Logic (缓存 5 分钟，防止频繁请求) ---
 @st.cache_data(ttl=300)
 def fetch_rss_news():
     rss_urls = [
@@ -403,7 +410,7 @@ if not st.session_state.messages:
     with col_news:
         # 顶部标题栏 + 新闻源说明
         st.markdown("""
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:8px;">
             <div style="font-size:0.9rem; font-weight:700; text-transform:uppercase; letter-spacing:1px;">
                 <span style="color:#ef4444">📡 Live Narrative Stream</span>
             </div>
@@ -411,7 +418,7 @@ if not st.session_state.messages:
                 ● LIVE
             </div>
         </div>
-        <div style="font-size:0.7rem; color:#6b7280; margin-bottom:10px;">
+        <div style="font-size:0.7rem; color:#6b7280; margin-bottom:15px; font-style:italic;">
             Sources: Reuters • TechCrunch • CoinDesk
         </div>
         <style>
@@ -419,15 +426,16 @@ if not st.session_state.messages:
         </style>
         """, unsafe_allow_html=True)
 
-        # 🔥 核心修改：使用 st.fragment 实现局部自动刷新 (每60秒)
-        @st.fragment(run_every=60)
+        # 🔥 核心修改：使用 st.fragment 实现局部自动刷新 (每 1 秒刷新时间)
+        # 数据 fetch_rss_news 本身有缓存，所以这里 run_every=1 只是刷新 UI 时间显示
+        @st.fragment(run_every=1)
         def render_news_feed():
-            # 获取最新新闻
+            # 获取最新新闻 (带缓存，不会频繁请求)
             latest_news = fetch_rss_news()
             
-            # 显示更新时间戳
+            # 显示更新时间戳 (每秒跳动)
             current_time = datetime.datetime.now().strftime("%H:%M:%S")
-            st.caption(f"Last updated: {current_time} (Auto-refreshing...)")
+            st.caption(f"Last updated: {current_time}")
 
             if not latest_news:
                 st.info("Scanning global feeds...")
@@ -501,10 +509,11 @@ if not st.session_state.messages:
             st.info("Markets are relatively calm.")
 
 # ================= 📊 5. ANALYSIS RESULT VIEW =================
+# 当有对话历史时，隐藏上面的仪表盘，显示分析结果
 if st.session_state.messages:
     st.markdown("---")
     
-    # Show context card if available
+    # 顶部：Show context card if available
     if st.session_state.current_market:
         m = st.session_state.current_market
         st.markdown(f"""
@@ -518,10 +527,15 @@ if st.session_state.messages:
         </div>
         """, unsafe_allow_html=True)
 
+    # 显示 AI 回复
     for msg in st.session_state.messages:
         if msg['role'] == 'assistant':
+            # 尝试提取 JSON 里的 Alpha Gap
             text = msg['content']
+            
+            # 清理 JSON 以便显示
             display_text = re.sub(r'```json.*?```', '', text, flags=re.DOTALL)
+            
             st.markdown(f"""
             <div class="analysis-card">
                 <div style="font-family:'Inter'; line-height:1.6; color:#d1d5db;">
@@ -529,15 +543,20 @@ if st.session_state.messages:
                 </div>
             </div>
             """, unsafe_allow_html=True)
+            
+            # 可视化 Alpha Gap
             try:
                 json_match = re.search(r'```json\s*({.*?})\s*```', text, re.DOTALL)
                 if json_match and st.session_state.current_market:
                     data = json.loads(json_match.group(1))
                     ai_prob = data.get('ai_probability', 0.5)
+                    # 解析市场概率
                     m_prob_str = st.session_state.current_market['odds'].split(':')[-1].replace('%','').strip()
                     m_prob = float(m_prob_str)/100
+                    
                     gap = ai_prob - m_prob
                     color = "#ef4444" if abs(gap) > 0.2 else "#f59e0b"
+                    
                     st.markdown(f"""
                     <div style="margin-top:15px; padding:15px; background:rgba(0,0,0,0.3); border-radius:8px; border:1px solid {color};">
                         <div style="display:flex; justify-content:space-between; font-size:0.9rem; margin-bottom:5px;">
@@ -554,6 +573,7 @@ if st.session_state.messages:
                     """, unsafe_allow_html=True)
             except: pass
 
+    # 返回首页按钮
     if st.button("⬅️ Back to Dashboard"):
         st.session_state.messages = []
         st.rerun()
