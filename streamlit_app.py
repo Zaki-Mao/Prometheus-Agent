@@ -814,18 +814,23 @@ if not st.session_state.messages:
         """, unsafe_allow_html=True)
         
         trends = fetch_google_trends()
-        trend_html = '<div class="trend-container">'
-        for t in trends:
-            heat_class = f"trend-{t['heat']}"
-            encoded = urllib.parse.quote(t['name'])
-            trend_html += f"""
-            <a href="https://www.google.com/search?q={encoded}" target="_blank" class="trend-tag {heat_class}">
-                {t['name']}
-                <span class="trend-vol">{t['vol']}</span>
-            </a>
-            """
-        trend_html += '</div>'
-        st.markdown(trend_html, unsafe_allow_html=True)
+        
+        # 使用 columns 布局来显示 trends，避免 HTML 渲染问题
+        if trends:
+            # 每行最多 5 个标签
+            rows = [trends[i:i+5] for i in range(0, len(trends), 5)]
+            for row in rows:
+                cols = st.columns(len(row))
+                for idx, t in enumerate(row):
+                    with cols[idx]:
+                        heat_class = f"trend-{t['heat']}"
+                        encoded = urllib.parse.quote(t['name'])
+                        st.markdown(f"""
+                        <a href="https://www.google.com/search?q={encoded}" target="_blank" class="trend-tag {heat_class}">
+                            {t['name']}
+                            <span class="trend-vol">{t['vol']}</span>
+                        </a>
+                        """, unsafe_allow_html=True)
         
         st.markdown("<br>", unsafe_allow_html=True)
         
@@ -872,13 +877,14 @@ if not st.session_state.messages:
                         </div>
                         """, unsafe_allow_html=True)
                         
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if st.button("🔍 Analyze", key=f"analyze_{news['link']}", use_container_width=True):
-                                st.session_state.user_news_text = news['title']
-                                st.rerun()
-                        with col2:
-                            st.markdown(f'<a href="{news["link"]}" target="_blank"><button style="width:100%; padding:8px; background:rgba(255,255,255,0.05); border:1px solid rgba(220,38,38,0.2); color:#ef4444; border-radius:4px; cursor:pointer;">🔗 Read</button></a>', unsafe_allow_html=True)
+                        # 只保留 Read 按钮
+                        st.markdown(f"""
+                        <a href="{news['link']}" target="_blank" style="text-decoration:none;">
+                            <button style="width:100%; padding:10px; background:rgba(220,38,38,0.2); border:1px solid #ef4444; color:#fca5a5; border-radius:6px; cursor:pointer; font-weight:600; transition:all 0.3s;">
+                                🔗 Read Source
+                            </button>
+                        </a>
+                        """, unsafe_allow_html=True)
         else:
             st.info("No recent news in this category. Try another category.")
     
