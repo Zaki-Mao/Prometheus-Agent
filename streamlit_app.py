@@ -1,4 +1,3 @@
-
 import streamlit as st
 import requests
 import json
@@ -322,31 +321,24 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 🧠 5. LOGIC CORE =================
+# ================= 🧠 5. LOGIC CORE (UPDATED AGENT) =================
 
-# --- 🔥 A. Crypto Prices (扩展到40+币种) ---
+# --- 🔥 A. Crypto Prices ---
 @st.cache_data(ttl=60)
 def fetch_crypto_prices_v2():
-    """获取更多主流加密货币实时价格 - 扩展到40+币种"""
     symbols = [
         "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", 
         "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "SHIBUSDT", "DOTUSDT", 
         "LINKUSDT", "TRXUSDT", "MATICUSDT", "LTCUSDT", "BCHUSDT", 
         "UNIUSDT", "NEARUSDT", "APTUSDT", "FILUSDT", "ICPUSDT",
-        "PEPEUSDT", "WIFUSDT", "SUIUSDT", "FETUSDT", "ATOMUSDT",
-        "ETCUSDT", "XLMUSDT", "RNDRUSDT", "INJUSDT", "STXUSDT",
-        "OPUSDT", "ARBUSDT", "IMXUSDT", "ALGOUSDT", "AAVEUSDT",
-        "TIAUSDT", "LDOUSDT", "HBARUSDT", "WLDUSDT", "SEIUSDT"
+        "PEPEUSDT", "WIFUSDT", "SUIUSDT", "FETUSDT"
     ]
     crypto_data = []
-    
     try:
         url = "https://api.binance.com/api/v3/ticker/24hr"
         response = requests.get(url, timeout=5)
-        
         if response.status_code == 200:
             all_tickers = {t['symbol']: t for t in response.json()}
-            
             for sym in symbols:
                 if sym in all_tickers:
                     ticker = all_tickers[sym]
@@ -370,25 +362,14 @@ def fetch_crypto_prices_v2():
                         "volume": vol_str,
                         "trend": "up" if change_24h > 0 else "down"
                     })
-    except:
-        pass 
-
-    # Robust Fallback
+    except: pass 
     if not crypto_data:
-        crypto_data = [
-            {"symbol": "BTC", "price": "$94,250", "change": 2.3, "volume": "25.5B", "trend": "up"},
-            {"symbol": "ETH", "price": "$3,421", "change": -1.2, "volume": "12.3B", "trend": "down"},
-            {"symbol": "SOL", "price": "$145", "change": 3.5, "volume": "2.1B", "trend": "up"},
-            {"symbol": "BNB", "price": "$612", "change": 0.8, "volume": "1.2B", "trend": "up"}
-        ]
-    
+        crypto_data = [{"symbol": "BTC", "price": "$94,250", "change": 2.3, "volume": "25.5B", "trend": "up"}]
     return crypto_data
 
 # --- 🔥 B. Categorized News Fetcher ---
 @st.cache_data(ttl=300)
 def fetch_categorized_news_v2():
-    """获取分类新闻"""
-    
     def fetch_rss(url, limit=20):
         items = []
         try:
@@ -402,7 +383,6 @@ def fetch_categorized_news_v2():
                         if diff.total_seconds() < 3600: time_display = f"{int(diff.total_seconds()/60)}m ago"
                         else: time_display = f"{int(diff.total_seconds()/3600)}h ago"
                     except: pass
-                
                 items.append({
                     "title": entry.title,
                     "source": entry.get("source", {}).get("title", "News"),
@@ -418,45 +398,26 @@ def fetch_categorized_news_v2():
         "tech": "https://techcrunch.com/feed/",
         "web3": "https://www.coindesk.com/arc/outboundfeeds/rss/"
     }
-    
-    return {
-        "all": fetch_rss(feeds["all"], 30),
-        "politics": fetch_rss(feeds["politics"], 20),
-        "tech": fetch_rss(feeds["tech"], 20),
-        "web3": fetch_rss(feeds["web3"], 20)
-    }
+    return {k: fetch_rss(v, 30) for k, v in feeds.items()}
 
-# --- 🔥 C. Polymarket - 简化版：只显示标题和交易量 ---
+# --- 🔥 C. Polymarket Fetcher ---
 @st.cache_data(ttl=60)
 def fetch_polymarket_v5_simple(limit=30):
-    """
-    🔥 极简版本：只返回标题、交易量、链接
-    不再区分市场类型，统一按交易量排序
-    """
     try:
         url = "https://gamma-api.polymarket.com/events?limit=150&closed=false"
         resp = requests.get(url, timeout=8).json()
         markets = []
-        
         if isinstance(resp, list):
             for event in resp:
                 try:
-                    if not event.get('markets'): 
-                        continue
-                    
+                    if not event.get('markets'): continue
                     m = event['markets'][0]
                     vol = float(m.get('volume', 0))
+                    if vol <= 0: continue
                     
-                    if vol <= 0:
-                        continue
-                    
-                    # 格式化交易量
-                    if vol >= 1000000:
-                        vol_str = f"${vol/1000000:.1f}M"
-                    elif vol >= 1000:
-                        vol_str = f"${vol/1000:.0f}K"
-                    else:
-                        vol_str = f"${vol:.0f}"
+                    if vol >= 1000000: vol_str = f"${vol/1000000:.1f}M"
+                    elif vol >= 1000: vol_str = f"${vol/1000:.0f}K"
+                    else: vol_str = f"${vol:.0f}"
                     
                     markets.append({
                         "title": event.get('title', 'Untitled Market'),
@@ -464,31 +425,156 @@ def fetch_polymarket_v5_simple(limit=30):
                         "volume": vol,
                         "vol_str": vol_str
                     })
-                    
-                except Exception as e:
-                    continue
-        
-        # 按交易量降序排序
+                except: continue
         markets.sort(key=lambda x: x['volume'], reverse=True)
         return markets[:limit]
-        
-    except Exception as e:
-        return []
+    except: return []
 
-def search_with_exa_optimized(user_text):
-    if not EXA_AVAILABLE or not EXA_API_KEY: return [], user_text
+# --- 🔥 D. NEW AGENT LOGIC (Search + Analysis) ---
+
+def generate_keywords(user_text):
+    """Generate search keywords for Polymarket"""
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        prompt = f"Extract 2-3 most critical keywords from this news to search on a prediction market. Return ONLY keywords separated by spaces. Input: {user_text}"
+        resp = model.generate_content(prompt)
+        return resp.text.strip()
+    except: return user_text
+
+def search_market_data(user_query):
+    """
+    Search Polymarket for a matching event.
+    Returns the top matching market object or None.
+    """
+    if not EXA_AVAILABLE or not EXA_API_KEY: return None
+    
     try:
         exa = Exa(EXA_API_KEY)
-        resp = exa.search(f"prediction market {user_text}", num_results=5, include_domains=["polymarket.com"])
-        return [{"title": "Search Result", "slug": "home", "odds": "N/A", "volume": 0}], user_text
-    except: return [], user_text
+        # Search specifically on Polymarket domain
+        keywords = generate_keywords(user_query)
+        search_resp = exa.search(
+            f"site:polymarket.com {keywords}",
+            num_results=3,
+            type="neural",
+            include_domains=["polymarket.com"]
+        )
+        
+        for result in search_resp.results:
+            # Extract slug from URL
+            match = re.search(r'polymarket\.com/event/([^/]+)', result.url)
+            if match:
+                slug = match.group(1)
+                # Fetch market details from Gamma API
+                api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
+                data = requests.get(api_url, timeout=5).json()
+                
+                if data and isinstance(data, list):
+                    event = data[0]
+                    m = event['markets'][0]
+                    # Parse outcomes/prices
+                    outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
+                    prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
+                    vol = float(m.get('volume', 0))
+                    
+                    # Format prices
+                    odds_str = []
+                    for i, out in enumerate(outcomes):
+                        prob = float(prices[i]) * 100
+                        odds_str.append(f"{out}: {prob:.1f}%")
+                    
+                    return {
+                        "title": event['title'],
+                        "odds": " | ".join(odds_str),
+                        "volume": f"${vol:,.0f}",
+                        "slug": slug,
+                        "url": result.url
+                    }
+    except Exception as e:
+        print(f"Market search error: {e}")
+        pass
+    
+    return None
 
-def stream_chat_response(messages, market_data=None):
+def analyze_with_agent(user_news, market_data):
+    """
+    Core Agent Logic.
+    Input: User News Text, Market Data (Optional)
+    Output: Professional Analysis HTML
+    """
     model = genai.GenerativeModel('gemini-2.5-flash')
+    current_date = datetime.datetime.now().strftime("%Y-%m-%d")
+    
+    # Context Construction
+    if market_data:
+        market_context = f"""
+        [REAL-TIME MARKET DATA FOUND]
+        - Market: {market_data['title']}
+        - Current Odds: {market_data['odds']}
+        - Volume: {market_data['volume']}
+        - Source: Polymarket (Wisdom of the Crowds)
+        
+        INSTRUCTION: Compare the news claim against these odds. Does the market agree? 
+        If news says "X happened" but odds are low, it's FUD.
+        If odds spiked, the market confirms it.
+        """
+    else:
+        market_context = f"""
+        [NO DIRECT MARKET DATA FOUND]
+        INSTRUCTION: You must act as a senior macro strategist. 
+        Estimate the implied probability of this event being true/impactful based on historical precedents.
+        """
+
+    system_prompt = f"""
+    You are **Be Holmes**, a top-tier Hedge Fund Analyst specializing in "Event-Driven Arbitrage".
+    Current Date: {current_date}
+    
+    TARGET: Analyze the user's news input for truthfulness and INVESTMENT OPPORTUNITY.
+    
+    {market_context}
+    
+    --- ANALYSIS REQUIREMENTS ---
+    
+    1. **Reality Score (0-100)**: 
+       - Based on market data (if available) and source credibility.
+       - < 20: FUD/Fake. > 80: Confirmed Fact.
+       
+    2. **The "Alpha" Insight**:
+       - Don't just summarize. What is the *second-order* effect?
+       - Example: "If Unitree joins Spring Festival Gala" -> Robot stocks hype -> Short-term pump for robotics supply chain.
+       
+    3. **Investment Implications (Actionable)**:
+       - **Sectors to Watch**: (e.g., AI, Defense, Crypto, Energy)
+       - **Potential Tickers**: List specific stock/crypto tickers that might move (e.g., NVDA, BTC, 002352.SZ).
+       - **Direction**: [Bullish/Bearish/Neutral]
+       
+    OUTPUT FORMAT (Markdown):
+    
+    ### 🕵️‍♂️ Reality Check: [Verdict]
+    **Truth Probability:** [Score]% 
+    *(Explain why based on market data or logic)*
+    
+    ---
+    ### 🧠 Deep Dive
+    [Your professional analysis of the event's validity and significance]
+    
+    ---
+    ### 🚀 Investment Signals (Alpha)
+    * **🎯 Sectors**: [List Sectors]
+    * **📈 Bullish Watchlist**: [List Tickers/Assets]
+    * **📉 Bearish Risks**: [List Risks]
+    * **💡 Strategy**: [Short-term trade idea]
+    """
+    
+    messages = [
+        {"role": "user", "parts": [system_prompt]},
+        {"role": "user", "parts": [f"News Input: {user_news}"]}
+    ]
+    
     try:
-        resp = model.generate_content(f"Analyze this news regarding prediction markets: {messages[-1]['content']}")
-        return resp.text
-    except: return "Analysis Unavailable."
+        response = model.generate_content(messages)
+        return response.text
+    except Exception as e:
+        return f"Agent Analysis Failed: {str(e)}"
 
 # ================= 🖥️ 6. MAIN LAYOUT =================
 
@@ -500,14 +586,24 @@ st.markdown('<div class="hero-subtitle">Narrative vs. Reality Engine</div>', uns
 _, s_mid, _ = st.columns([1, 6, 1])
 with s_mid:
     input_val = st.session_state.get("user_news_text", "")
-    user_query = st.text_area("Analyze News", value=input_val, height=70, placeholder="Paste a headline...", label_visibility="collapsed")
+    user_query = st.text_area("Analyze News", value=input_val, height=70, placeholder="Paste a headline (e.g., 'Unitree robot on Spring Festival Gala')...", label_visibility="collapsed")
+    
     if st.button("⚖️ Reality Check", use_container_width=True):
         if user_query:
             st.session_state.is_processing = True
-            st.session_state.messages.append({"role": "user", "content": user_query})
-            with st.spinner("Analyzing..."):
-                resp = stream_chat_response(st.session_state.messages, None)
-                st.session_state.messages.append({"role": "assistant", "content": resp})
+            st.session_state.messages = [] # Clear previous
+            
+            # 1. Agent Search Step
+            with st.spinner("🕵️‍♂️ Searching Prediction Markets..."):
+                market_data = search_market_data(user_query)
+                st.session_state.current_market = market_data
+            
+            # 2. Agent Analysis Step
+            with st.spinner("🧠 Generating Alpha Signals..."):
+                analysis_text = analyze_with_agent(user_query, market_data)
+                st.session_state.messages.append({"role": "assistant", "content": analysis_text})
+                
+            st.session_state.is_processing = False
             st.rerun()
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -545,7 +641,7 @@ if not st.session_state.messages:
                 st.session_state.news_category = c
                 st.rerun()
 
-        # 实时更新的新闻流
+        # Render Feed
         @st.fragment(run_every=1)
         def render_news_feed():
             now_utc = datetime.datetime.now(datetime.timezone.utc)
@@ -563,7 +659,6 @@ if not st.session_state.messages:
 </div>
 """, unsafe_allow_html=True)
 
-            # Web3 (Crypto) Logic - 🔥 扩展到40+币种
             if st.session_state.news_category == "web3":
                 data = fetch_crypto_prices_v2()
                 if data:
@@ -587,7 +682,6 @@ if not st.session_state.messages:
                 else:
                     st.info("Loading crypto data...")
             else:
-                # News Logic
                 all_news = fetch_categorized_news_v2()
                 news_list = all_news.get(st.session_state.news_category, all_news['all'])
                 if news_list:
@@ -606,16 +700,17 @@ if not st.session_state.messages:
                             """, unsafe_allow_html=True)
                 else:
                     st.info("No news available.")
-
         render_news_feed()
 
-    # === RIGHT: Polymarket (极简版 - 只显示标题和交易量) ===
+    # === RIGHT: Polymarket ===
     with col_markets:
         st.markdown('<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid rgba(220,38,38,0.3); padding-bottom:8px;"><span style="font-size:0.9rem; font-weight:700; color:#ef4444;">💰 PREDICTION MARKETS (TOP VOLUME)</span></div>', unsafe_allow_html=True)
         
-        # 🔥 使用极简版本 V5
-        markets = fetch_polymarket_v5_simple(30)
+        sc1, sc2 = st.columns(2)
+        if sc1.button("💵 Volume", use_container_width=True): st.session_state.market_sort = "volume"
+        if sc2.button("🔥 Activity", use_container_width=True): st.session_state.market_sort = "active"
         
+        markets = fetch_polymarket_v5_simple(30)
         if markets:
             rows = [markets[i:i+2] for i in range(0, len(markets), 2)]
             for row in rows:
@@ -624,9 +719,9 @@ if not st.session_state.messages:
                     cols[i].markdown(f"""
                     <a href="https://polymarket.com/event/{m['slug']}" target="_blank" style="text-decoration:none;">
                         <div class="market-card-modern">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <div class="market-title-mod" style="flex: 1; margin-right: 10px;">{m['title']}</div>
-                                <div class="market-vol" style="font-size: 0.9rem; font-weight: 700; color: #ef4444;">{m['vol_str']}</div>
+                            <div class="market-head">
+                                <div class="market-title-mod">{m['title']}</div>
+                                <div class="market-vol">{m['vol_str']}</div>
                             </div>
                         </div>
                     </a>
@@ -635,11 +730,35 @@ if not st.session_state.messages:
             st.info("Loading markets...")
 
 else:
-    # Analysis View
+    # === ANALYSIS RESULT ===
     st.markdown("---")
+    
+    # 1. Market Data Card (If Found)
+    if st.session_state.current_market:
+        m = st.session_state.current_market
+        st.markdown(f"""
+        <div style="background:rgba(20,0,0,0.8); border-left:4px solid #ef4444; padding:15px; border-radius:8px; margin-bottom:20px;">
+            <div style="font-size:0.8rem; color:#9ca3af; text-transform:uppercase;">🎯 Live Prediction Market Found</div>
+            <div style="font-size:1.2rem; color:#e5e7eb; font-weight:bold; margin-top:5px;">{m['title']}</div>
+            <div style="display:flex; justify-content:space-between; margin-top:10px; align-items:center;">
+                <div style="font-family:'JetBrains Mono'; color:#ef4444; font-weight:700;">{m['odds']}</div>
+                <div style="color:#6b7280; font-size:0.8rem;">Vol: {m['volume']}</div>
+            </div>
+            <a href="{m['url']}" target="_blank" style="display:inline-block; margin-top:10px; color:#fca5a5; font-size:0.8rem; text-decoration:none;">🔗 View on Polymarket</a>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:8px; margin-bottom:20px; text-align:center; color:#6b7280; font-size:0.8rem;">
+            No direct betting market found for this specific headline. Using AI logical inference.
+        </div>
+        """, unsafe_allow_html=True)
+
+    # 2. AI Analysis
     for msg in st.session_state.messages:
         if msg['role'] == 'assistant':
             st.markdown(f"<div class='analysis-card'>{msg['content']}</div>", unsafe_allow_html=True)
+            
     if st.button("⬅️ Back"):
         st.session_state.messages = []
         st.rerun()
