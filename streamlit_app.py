@@ -8,6 +8,7 @@ import time
 import datetime
 import random
 import urllib.parse
+import html
 
 # -----------------------------------------------------------------------------
 # 0. DEPENDENCY CHECK
@@ -404,8 +405,8 @@ def fetch_categorized_news_v2():
     }
     return {k: fetch_rss(v, 30) for k, v in feeds.items()}
 
-# --- 🔥 C. Polymarket Fetcher (FILTERED & EXPANDED) ---
-# 统一的Polymarket数据处理逻辑 - 解决乱码问题
+# --- 🔥 C. Polymarket Fetcher (Unified Logic) ---
+# 统一的Polymarket数据处理逻辑 - 解决乱码和解析一致性
 def process_polymarket_event(event):
     """处理单个Polymarket事件，返回标准化数据结构"""
     try:
@@ -420,7 +421,12 @@ def process_polymarket_event(event):
         if event.get('closed') is True: return None
         if not event.get('markets'): return None
         
-        m = event['markets'][0] # 主市场
+        # 寻找流动性最好的市场作为主市场
+        markets_list = event.get('markets', [])
+        # 优先排序: 交易量大 > 0
+        markets_list.sort(key=lambda x: float(x.get('volume', 0)), reverse=True)
+        m = markets_list[0]
+        
         vol = float(m.get('volume', 0))
         if vol < 1000: return None # 过滤死盘
         
@@ -428,10 +434,44 @@ def process_polymarket_event(event):
         elif vol >= 1000: vol_str = f"${vol/1000:.0f}K"
         else: vol_str = f"${vol:.0f}"
 
-        # 解析赔率（兼容多选项）- 修复 Key Error 问题
+        # 解析赔率（兼容多选项）
         outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
         prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
         
+        # 收集所有子市场详情，用于搜索后的详情页展示
+        all_sub_markets = []
+        for sub_m in markets_list[:5]: # 只取前5个子市场避免过多
+            try:
+                sub_out = json.loads(sub_m.get('outcomes')) if isinstance(sub_m.get('outcomes'), str) else sub_m.get('outcomes')
+                sub_pri = json.loads(sub_m.get('outcomePrices')) if isinstance(sub_m.get('outcomePrices'), str) else sub_m.get('outcomePrices')
+                sub_vol = float(sub_m.get('volume', 0))
+                
+                # 构建子市场数据
+                sub_data = {
+                    "question": sub_m.get('question', title),
+                    "volume": sub_vol,
+                    "type": "binary" if len(sub_out) == 2 else "multiple",
+                    "options": []
+                }
+                
+                # Binary Map
+                if len(sub_out) == 2 and "Yes" in sub_out and "No" in sub_out:
+                    y_idx = sub_out.index("Yes")
+                    n_idx = sub_out.index("No")
+                    sub_data['yes_price'] = float(sub_pri[y_idx]) * 100 if y_idx < len(sub_pri) else 0
+                    sub_data['no_price'] = float(sub_pri[n_idx]) * 100 if n_idx < len(sub_pri) else 0
+                else:
+                    # Multi Map
+                    for i, o in enumerate(sub_out):
+                        if i < len(sub_pri):
+                            sub_data['options'].append({
+                                "option": str(o), 
+                                "price": float(sub_pri[i]) * 100
+                            })
+                all_sub_markets.append(sub_data)
+            except: continue
+
+        # 生成主列表显示的 Odds 字符串 (Top 3 of Main Market)
         outcome_data = []
         if outcomes and prices:
             for i, out in enumerate(outcomes):
@@ -441,8 +481,6 @@ def process_polymarket_event(event):
                         outcome_data.append((str(out), prob))
                     except: continue
         
-        if not outcome_data: return None
-
         # 按概率降序
         outcome_data.sort(key=lambda x: x[1], reverse=True)
         top_odds = [f"{o}: {p:.1f}%" for o, p in outcome_data[:3]]
@@ -454,7 +492,8 @@ def process_polymarket_event(event):
             "volume": vol,
             "vol_str": vol_str,
             "odds": odds_str,
-            "url": f"https://polymarket.com/event/{event.get('slug', '')}"
+            "url": f"https://polymarket.com/event/{event.get('slug', '')}",
+            "markets": all_sub_markets # 包含详细子市场数据
         }
     except Exception as e:
         return None
@@ -478,20 +517,21 @@ def fetch_polymarket_v5_simple(limit=60):
 
 # --- 🔥 D. NEW AGENT LOGIC (Unified Search + Deep Analysis) ---
 def generate_keywords(user_text):
+    """Generate ENGLISH keywords for search"""
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
-        prompt = f"Extract 2-3 most critical keywords from this news to search on a prediction market. Return ONLY keywords separated by spaces. Input: {user_text}"
+        prompt = f"Extract 2-3 most critical keywords from this news to search on a prediction market. **CRITICAL: Translate keywords to English if input is Chinese.** Return ONLY keywords separated by spaces. Input: {user_text}"
         resp = model.generate_content(prompt)
         return resp.text.strip()
     except: return user_text
 
 def search_market_data_list(user_query):
-    """搜索Polymarket，逻辑与主页列表统一"""
+    """搜索Polymarket，返回列表"""
     if not EXA_AVAILABLE or not EXA_API_KEY: return []
     candidates = []
     try:
         exa = Exa(EXA_API_KEY)
-        keywords = generate_keywords(user_query)
+        keywords = generate_keywords(user_query) # Force English Keywords
         search_resp = exa.search(
             f"site:polymarket.com {keywords}",
             num_results=5,
@@ -505,7 +545,7 @@ def search_market_data_list(user_query):
                 api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
                 data = requests.get(api_url, timeout=5).json()
                 if data and isinstance(data, list):
-                    # 使用统一的处理函数，确保解析逻辑一致
+                    # 使用与首页完全一致的解析逻辑，包含 `markets` 字段
                     market_data = process_polymarket_event(data[0])
                     if market_data:
                         candidates.append(market_data)
@@ -527,11 +567,14 @@ def get_agent_response(history, market_data):
     
     # 1. Market Context Construction
     if market_data:
+        # 确保传入 Agent 的是该事件下 Top 1 市场的赔率
+        odds_info = market_data['odds']
+        
         if is_cn:
             market_context = f"""
             ✅ **[真实资金定价] Polymarket 数据**
             - **问题:** {market_data['title']}
-            - **当前赔率 (Top 3):** {market_data['odds']}
+            - **当前赔率 (Top 3):** {odds_info}
             - **资金量:** {market_data['volume']}
             
             **指令:** 市场赔率是“聪明的钱”打出的共识。如果新闻情绪与赔率不符（例如新闻说‘大概率发生’但赔率只有20%），则存在【预期差交易机会】。
@@ -540,7 +583,7 @@ def get_agent_response(history, market_data):
             market_context = f"""
             ✅ **[MARKET PRICING] Polymarket Data**
             - **Market:** {market_data['title']}
-            - **Top 3 Odds:** {market_data['odds']}
+            - **Top 3 Odds:** {odds_info}
             - **Volume:** {market_data['volume']}
             
             **INSTRUCTION:** Odds represent "Smart Money". If news hype disagrees with odds, identify the **Mispricing**.
@@ -685,7 +728,7 @@ with s_mid:
             for idx, m in enumerate(st.session_state.search_candidates):
                 c1, c2 = st.columns([4, 1])
                 with c1:
-                    st.info(f"**{m['title']}**\n\nOdds: {m['odds']} (Vol: {m['volume']})")
+                    st.info(f"**{m['title']}**\n\nOdds: {m['odds']} (Vol: {m['vol_str']})")
                 with c2:
                     if st.button("Analyze", key=f"btn_{idx}", use_container_width=True):
                         st.session_state.current_market = m
@@ -719,16 +762,73 @@ st.markdown("<br>", unsafe_allow_html=True)
 # === DISPLAY ANALYSIS & CHAT (Interactive Mode) ===
 if st.session_state.messages and st.session_state.search_stage == "analysis":
     
+    # 1. Market Data Context Card (Always visible at top)
     if st.session_state.current_market:
         m = st.session_state.current_market
+        
+        # Build Sub-Market HTML (Fixed for Multi-Options)
+        markets_html = ""
+        for idx, market in enumerate(m.get('markets', []), 1):
+            if market['type'] == 'binary':
+                markets_html += f"""
+                <div style="background:rgba(255,255,255,0.03); padding:10px; border-radius:6px; margin-bottom:8px; border-left:3px solid #ef4444;">
+                    <div style="font-size:0.85rem; color:#e5e7eb; font-weight:600; margin-bottom:6px;">{idx}. {market['question']}</div>
+                    <div style="display:flex; gap:10px;">
+                        <div style="flex:1; background:rgba(16,185,129,0.1); padding:6px; border-radius:4px; border:1px solid rgba(16,185,129,0.2);">
+                            <span style="font-size:0.7rem; color:#9ca3af;">Yes</span>
+                            <span style="font-size:0.95rem; color:#10b981; font-weight:700; font-family:'JetBrains Mono'; margin-left:8px;">{market['yes_price']:.1f}%</span>
+                        </div>
+                        <div style="flex:1; background:rgba(239,68,68,0.1); padding:6px; border-radius:4px; border:1px solid rgba(239,68,68,0.2);">
+                            <span style="font-size:0.7rem; color:#9ca3af;">No</span>
+                            <span style="font-size:0.95rem; color:#ef4444; font-weight:700; font-family:'JetBrains Mono'; margin-left:8px;">{market['no_price']:.1f}%</span>
+                        </div>
+                    </div>
+                    <div style="font-size:0.7rem; color:#6b7280; margin-top:4px; text-align:right;">Vol: ${market['volume']:,.0f}</div>
+                </div>
+                """
+            else:
+                options_html = ""
+                sorted_options = sorted(market['options'], key=lambda x: x['price'], reverse=True)[:5] # Show top 5 options
+                for opt in sorted_options:
+                    bar_width = min(opt['price'], 100)
+                    options_html += f"""
+                    <div style="margin-bottom:4px;">
+                        <div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-bottom:2px;">
+                            <span style="color:#e5e7eb;">{opt['option']}</span>
+                            <span style="color:#fbbf24; font-weight:700; font-family:'JetBrains Mono';">{opt['price']:.1f}%</span>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.1); height:4px; border-radius:2px; overflow:hidden;">
+                            <div style="background:#fbbf24; height:100%; width:{bar_width}%;"></div>
+                        </div>
+                    </div>
+                    """
+                markets_html += f"""
+                <div style="background:rgba(255,255,255,0.03); padding:10px; border-radius:6px; margin-bottom:8px; border-left:3px solid #fbbf24;">
+                    <div style="font-size:0.85rem; color:#e5e7eb; font-weight:600; margin-bottom:8px;">{idx}. {market['question']}</div>
+                    {options_html}
+                    <div style="font-size:0.7rem; color:#6b7280; margin-top:6px; text-align:right;">Vol: ${market['volume']:,.0f}</div>
+                </div>
+                """
+        
         st.markdown(f"""
         <div style="background:rgba(20,0,0,0.8); border-left:4px solid #ef4444; padding:15px; border-radius:8px; margin-bottom:20px;">
-            <div style="font-size:0.8rem; color:#9ca3af; text-transform:uppercase;">🎯 Selected Prediction Market</div>
-            <div style="font-size:1.2rem; color:#e5e7eb; font-weight:bold; margin-top:5px;">{m['title']}</div>
-            <div style="display:flex; justify-content:space-between; margin-top:10px; align-items:center;">
-                <div style="font-family:'JetBrains Mono'; color:#ef4444; font-weight:700;">{m['odds']}</div>
-                <div style="color:#6b7280; font-size:0.8rem;">Vol: {m['volume']}</div>
+            <div style="font-size:0.8rem; color:#9ca3af; text-transform:uppercase;">🎯 Selected Prediction Market Event</div>
+            <div style="font-size:1.2rem; color:#e5e7eb; font-weight:bold; margin-top:5px; margin-bottom:15px;">{m['title']}</div>
+            
+            <div style="display:flex; gap:15px; margin-bottom:15px; padding:10px; background:rgba(255,255,255,0.05); border-radius:6px;">
+                <div>
+                    <div style="font-size:0.7rem; color:#9ca3af;">Total Volume</div>
+                    <div style="font-size:1rem; color:#fbbf24; font-weight:700; font-family:'JetBrains Mono';">${m['volume']:,.0f}</div>
+                </div>
+                <div>
+                    <div style="font-size:0.7rem; color:#9ca3af;">Sub-Markets</div>
+                    <div style="font-size:1rem; color:#10b981; font-weight:700; font-family:'JetBrains Mono';">{len(m.get('markets', []))}</div>
+                </div>
             </div>
+            
+            <div style="font-size:0.8rem; color:#ef4444; font-weight:600; margin-bottom:10px; text-transform:uppercase;">Market Details:</div>
+            {markets_html}
+            
             <a href="{m['url']}" target="_blank" style="display:inline-block; margin-top:10px; color:#fca5a5; font-size:0.8rem; text-decoration:none;">🔗 View on Polymarket</a>
         </div>
         """, unsafe_allow_html=True)
@@ -739,7 +839,7 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
         </div>
         """, unsafe_allow_html=True)
 
-    # Chat History
+    # 2. Chat History
     for msg in st.session_state.messages:
         if msg['role'] == 'user':
             with st.chat_message("user"):
@@ -748,8 +848,8 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
             with st.chat_message("assistant"):
                 st.markdown(msg['content'])
 
-    # Chat Input
-    if prompt := st.chat_input("Ask a follow-up question (e.g. 'What about Tesla?')..."):
+    # 3. Chat Input (Follow-up)
+    if prompt := st.chat_input("Ask a follow-up question..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.rerun()
 
