@@ -406,7 +406,7 @@ def fetch_categorized_news_v2():
     }
     return {k: fetch_rss(v, 30) for k, v in feeds.items()}
 
-# --- 🔥 C. Polymarket Fetcher (FILTERED & EXPANDED) ---
+# --- 🔥 C. Polymarket Fetcher (UNIFIED & ROBUST) ---
 def process_polymarket_event(event):
     """
     Core function to process ANY Polymarket event.
@@ -426,7 +426,6 @@ def process_polymarket_event(event):
         
         # 3. Find Main Market (Highest Volume)
         markets_list = event.get('markets', [])
-        # Fix: Ensure volume is treated as float for sorting
         markets_list.sort(key=lambda x: float(x.get('volume', 0) or 0), reverse=True)
         m = markets_list[0]
         
@@ -502,7 +501,7 @@ def process_polymarket_event(event):
 def fetch_polymarket_v5_simple(limit=60):
     """Fetch Top Markets for Homepage"""
     try:
-        url = "https://gamma-api.polymarket.com/events?limit=100&closed=false"
+        url = "https://gamma-api.polymarket.com/events?limit=200&closed=false"
         resp = requests.get(url, timeout=8).json()
         markets = []
         
@@ -526,7 +525,7 @@ def search_market_data_list(user_query):
         
         search_resp = exa.search(
             f"site:polymarket.com {keywords}",
-            num_results=15, # Robust number
+            num_results=15, 
             type="neural",
             include_domains=["polymarket.com"]
         )
@@ -727,7 +726,7 @@ with s_mid:
             for idx, m in enumerate(st.session_state.search_candidates):
                 c1, c2 = st.columns([4, 1])
                 with c1:
-                    st.info(f"**{m['title']}**\n\nOdds: {m['odds']} (Vol: {m['volume']})")
+                    st.info(f"**{m['title']}**\n\nOdds: {m['odds']} (Vol: {m['vol_str']})")
                 with c2:
                     if st.button("Analyze", key=f"btn_{idx}", use_container_width=True):
                         st.session_state.current_market = m
@@ -763,11 +762,29 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
     
     if st.session_state.current_market:
         m = st.session_state.current_market
-        # 修复后的无缩进HTML构建，防止被识别为代码块
-        markets_html = ""
+        # 1. 标题卡片
+        st.markdown(f"""
+        <div style="background:rgba(20,0,0,0.8); border-left:4px solid #ef4444; padding:15px; border-radius:8px; margin-bottom:10px;">
+            <div style="font-size:0.8rem; color:#9ca3af; text-transform:uppercase;">🎯 Selected Prediction Market Event</div>
+            <div style="font-size:1.2rem; color:#e5e7eb; font-weight:bold; margin-top:5px; margin-bottom:15px;">{m['title']}</div>
+            <div style="display:flex; gap:15px; margin-bottom:15px; padding:10px; background:rgba(255,255,255,0.05); border-radius:6px;">
+                <div>
+                    <div style="font-size:0.7rem; color:#9ca3af;">Total Volume</div>
+                    <div style="font-size:1rem; color:#fbbf24; font-weight:700; font-family:'JetBrains Mono';">${m['volume']:,.0f}</div>
+                </div>
+                <div>
+                    <div style="font-size:0.7rem; color:#9ca3af;">Sub-Markets</div>
+                    <div style="font-size:1rem; color:#10b981; font-weight:700; font-family:'JetBrains Mono';">{len(m.get('markets', []))}</div>
+                </div>
+            </div>
+            <div style="font-size:0.8rem; color:#ef4444; font-weight:600; margin-bottom:10px; text-transform:uppercase;">Market Details:</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # 2. 子市场列表循环 (Clean HTML generation)
         for idx, market in enumerate(m.get('markets', []), 1):
             if market['type'] == 'binary':
-                markets_html += textwrap.dedent(f"""
+                html_block = textwrap.dedent(f"""
                 <div style="background:rgba(255,255,255,0.03); padding:10px; border-radius:6px; margin-bottom:8px; border-left:3px solid #ef4444;">
                     <div style="font-size:0.85rem; color:#e5e7eb; font-weight:600; margin-bottom:6px;">{idx}. {market['question']}</div>
                     <div style="display:flex; gap:10px;">
@@ -783,15 +800,16 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
                     <div style="font-size:0.7rem; color:#6b7280; margin-top:4px; text-align:right;">Vol: ${market['volume']:,.0f}</div>
                 </div>
                 """)
+                st.markdown(html_block, unsafe_allow_html=True)
             else:
-                options_html = ""
+                options_str = ""
                 try:
                     sorted_opts = sorted(market.get('options', []), key=lambda x: x.get('price', 0), reverse=True)[:5]
                 except: sorted_opts = []
                 
                 for opt in sorted_opts:
                     bar_width = min(opt['price'], 100)
-                    options_html += textwrap.dedent(f"""
+                    options_str += textwrap.dedent(f"""
                     <div style="margin-bottom:4px;">
                         <div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-bottom:2px;">
                             <span style="color:#e5e7eb;">{opt['option']}</span>
@@ -802,36 +820,23 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
                         </div>
                     </div>
                     """)
-                markets_html += textwrap.dedent(f"""
+                
+                html_block = textwrap.dedent(f"""
                 <div style="background:rgba(255,255,255,0.03); padding:10px; border-radius:6px; margin-bottom:8px; border-left:3px solid #fbbf24;">
                     <div style="font-size:0.85rem; color:#e5e7eb; font-weight:600; margin-bottom:8px;">{idx}. {market['question']}</div>
-                    {options_html}
+                    {options_str}
                     <div style="font-size:0.7rem; color:#6b7280; margin-top:6px; text-align:right;">Vol: ${market['volume']:,.0f}</div>
                 </div>
                 """)
-        
-        st.markdown(textwrap.dedent(f"""
-        <div style="background:rgba(20,0,0,0.8); border-left:4px solid #ef4444; padding:15px; border-radius:8px; margin-bottom:20px;">
-            <div style="font-size:0.8rem; color:#9ca3af; text-transform:uppercase;">🎯 Selected Prediction Market Event</div>
-            <div style="font-size:1.2rem; color:#e5e7eb; font-weight:bold; margin-top:5px; margin-bottom:15px;">{m['title']}</div>
-            
-            <div style="display:flex; gap:15px; margin-bottom:15px; padding:10px; background:rgba(255,255,255,0.05); border-radius:6px;">
-                <div>
-                    <div style="font-size:0.7rem; color:#9ca3af;">Total Volume</div>
-                    <div style="font-size:1rem; color:#fbbf24; font-weight:700; font-family:'JetBrains Mono';">${m['volume']:,.0f}</div>
-                </div>
-                <div>
-                    <div style="font-size:0.7rem; color:#9ca3af;">Sub-Markets</div>
-                    <div style="font-size:1rem; color:#10b981; font-weight:700; font-family:'JetBrains Mono';">{len(m.get('markets', []))}</div>
-                </div>
-            </div>
-            
-            <div style="font-size:0.8rem; color:#ef4444; font-weight:600; margin-bottom:10px; text-transform:uppercase;">Market Details:</div>
-            {markets_html}
-            
-            <a href="{m['url']}" target="_blank" style="display:inline-block; margin-top:10px; color:#fca5a5; font-size:0.8rem; text-decoration:none;">🔗 View on Polymarket</a>
+                st.markdown(html_block, unsafe_allow_html=True)
+
+        # 3. 底部链接
+        st.markdown(f"""
+        <div style="background:rgba(20,0,0,0.8); border-left:4px solid #ef4444; padding:0 15px 15px 15px; border-bottom-left-radius:8px; border-bottom-right-radius:8px; margin-top:-20px; margin-bottom:20px;">
+             <a href="{m['url']}" target="_blank" style="display:inline-block; margin-top:10px; color:#fca5a5; font-size:0.8rem; text-decoration:none;">🔗 View on Polymarket</a>
         </div>
-        """), unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+
     else:
         st.markdown("""
         <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:8px; margin-bottom:20px; text-align:center; color:#6b7280; font-size:0.8rem;">
@@ -859,16 +864,10 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
         st.session_state.search_stage = "input"
         st.rerun()
 
-# ================= 🖥️ DASHBOARD =================
+# ================= 🖥️ DASHBOARD (Only if no analysis active) =================
 if not st.session_state.messages and st.session_state.search_stage == "input":
     col_news, col_markets = st.columns([1, 1], gap="large")
     
-    # ... (Left & Right columns - UNCHANGED) ...
-    # 为了节省篇幅，这里复用您上方代码中的 DASHBOARD 和 FOOTER 逻辑
-    # 只要上面的 SEARCH 和 ANALYSIS 逻辑替换正确即可。
-    
-    # (PASTE THE REST OF YOUR DASHBOARD & FOOTER CODE HERE)
-    # -------------------------------------------------------------------------
     # === LEFT: News Feed ===
     with col_news:
         st.markdown("""
@@ -985,7 +984,8 @@ if not st.session_state.messages and st.session_state.search_stage == "input":
         else:
             st.info("Loading markets...")
 
-    # FOOTER
+# ================= 🌐 7. FOOTER =================
+if not st.session_state.messages and st.session_state.search_stage == "input":
     st.markdown("---")
     st.markdown('<div style="text-align:center; color:#9ca3af; margin:25px 0; font-size:0.8rem; font-weight:700;">🌐 GLOBAL INTELLIGENCE HUB</div>', unsafe_allow_html=True)
     
