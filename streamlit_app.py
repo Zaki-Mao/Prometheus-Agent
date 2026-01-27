@@ -425,20 +425,16 @@ def fetch_categorized_news_v2():
         "web3": fetch_rss(feeds["web3"], 20)
     }
 
-# --- 🔥 C. Polymarket - 支持多选项市场 (显示Top选项) ---
+# --- 🔥 C. Polymarket - 简化版：只显示标题和交易量 ---
 @st.cache_data(ttl=60)
-def fetch_polymarket_v4(sort_by="volume", limit=20):
+def fetch_polymarket_v5_simple(limit=30):
     """
-    🔥 全新逻辑：支持多选项市场
-    
-    策略：
-    1. 不再限制只显示 Yes/No 市场
-    2. 对于多选项市场（如 Super Bowl），显示概率最高的 Top 2 选项
-    3. 对于 Yes/No 市场，正常显示
+    🔥 极简版本：只返回标题、交易量、链接
+    不再区分市场类型，统一按交易量排序
     """
     try:
-        url = "https://gamma-api.polymarket.com/events?limit=100&closed=false"
-        resp = requests.get(url, timeout=5).json()
+        url = "https://gamma-api.polymarket.com/events?limit=150&closed=false"
+        resp = requests.get(url, timeout=8).json()
         markets = []
         
         if isinstance(resp, list):
@@ -448,104 +444,30 @@ def fetch_polymarket_v4(sort_by="volume", limit=20):
                         continue
                     
                     m = event['markets'][0]
-                    
-                    # 解析 outcomes 和 prices
-                    outcomes_raw = m.get('outcomes')
-                    if isinstance(outcomes_raw, str):
-                        try: 
-                            outcomes = json.loads(outcomes_raw)
-                        except: 
-                            continue
-                    else:
-                        outcomes = outcomes_raw
-                    
-                    prices_raw = m.get('outcomePrices')
-                    if isinstance(prices_raw, str):
-                        try: 
-                            prices = json.loads(prices_raw)
-                        except: 
-                            continue
-                    else:
-                        prices = prices_raw
-                    
-                    # 基本验证
-                    if not isinstance(outcomes, list) or not isinstance(prices, list):
-                        continue
-                    
-                    if len(outcomes) != len(prices) or len(outcomes) < 2:
-                        continue
-                    
                     vol = float(m.get('volume', 0))
+                    
                     if vol <= 0:
                         continue
                     
-                    # 🔥 新逻辑：根据市场类型分类处理
-                    
-                    # 情况1: 标准 Yes/No 二元市场
-                    if len(outcomes) == 2 and "Yes" in outcomes and "No" in outcomes:
-                        yes_idx = outcomes.index("Yes")
-                        no_idx = outcomes.index("No")
-                        
-                        yes_price = float(prices[yes_idx]) * 100
-                        no_price = float(prices[no_idx]) * 100
-                        
-                        price_sum = yes_price + no_price
-                        if not (95 <= price_sum <= 105):
-                            continue
-                        
-                        markets.append({
-                            "title": event.get('title'),
-                            "type": "binary",
-                            "option1": "YES",
-                            "price1": int(round(yes_price)),
-                            "option2": "NO",
-                            "price2": int(round(no_price)),
-                            "slug": event.get('slug'),
-                            "volume": vol,
-                            "vol_str": f"${vol/1000000:.1f}M" if vol >= 1000000 else f"${vol/1000:.0f}K"
-                        })
-                    
-                    # 情况2: 多选项市场（如 Super Bowl, NBA Champion）
+                    # 格式化交易量
+                    if vol >= 1000000:
+                        vol_str = f"${vol/1000000:.1f}M"
+                    elif vol >= 1000:
+                        vol_str = f"${vol/1000:.0f}K"
                     else:
-                        # 将选项和价格配对并按价格排序
-                        options_with_prices = []
-                        for i, outcome in enumerate(outcomes):
-                            price = float(prices[i]) * 100
-                            if price > 0:  # 只保留有效概率的选项
-                                options_with_prices.append({
-                                    "name": outcome,
-                                    "price": price
-                                })
-                        
-                        # 按价格降序排序，取前2名
-                        options_with_prices.sort(key=lambda x: x['price'], reverse=True)
-                        
-                        if len(options_with_prices) >= 2:
-                            top1 = options_with_prices[0]
-                            top2 = options_with_prices[1]
-                            
-                            # 简化选项名称（如果太长）
-                            def shorten_name(name, max_len=15):
-                                if len(name) > max_len:
-                                    return name[:max_len] + "..."
-                                return name
-                            
-                            markets.append({
-                                "title": event.get('title'),
-                                "type": "multiple",
-                                "option1": shorten_name(top1['name']),
-                                "price1": int(round(top1['price'])),
-                                "option2": shorten_name(top2['name']),
-                                "price2": int(round(top2['price'])),
-                                "slug": event.get('slug'),
-                                "volume": vol,
-                                "vol_str": f"${vol/1000000:.1f}M" if vol >= 1000000 else f"${vol/1000:.0f}K"
-                            })
+                        vol_str = f"${vol:.0f}"
+                    
+                    markets.append({
+                        "title": event.get('title', 'Untitled Market'),
+                        "slug": event.get('slug', ''),
+                        "volume": vol,
+                        "vol_str": vol_str
+                    })
                     
                 except Exception as e:
                     continue
         
-        # 按交易量排序
+        # 按交易量降序排序
         markets.sort(key=lambda x: x['volume'], reverse=True)
         return markets[:limit]
         
@@ -686,49 +608,24 @@ if not st.session_state.messages:
 
         render_news_feed()
 
-    # === RIGHT: Polymarket (使用修复后的V3版本) ===
+    # === RIGHT: Polymarket (极简版 - 只显示标题和交易量) ===
     with col_markets:
         st.markdown('<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid rgba(220,38,38,0.3); padding-bottom:8px;"><span style="font-size:0.9rem; font-weight:700; color:#ef4444;">💰 PREDICTION MARKETS (TOP VOLUME)</span></div>', unsafe_allow_html=True)
         
-        # Sort Buttons
-        sc1, sc2 = st.columns(2)
-        if sc1.button("💵 Volume", use_container_width=True): st.session_state.market_sort = "volume"
-        if sc2.button("🔥 Activity", use_container_width=True): st.session_state.market_sort = "active"
-        
-        # 🔥 使用修复后的 V4 版本（支持多选项）
-        markets = fetch_polymarket_v4(st.session_state.market_sort, 20)
+        # 🔥 使用极简版本 V5
+        markets = fetch_polymarket_v5_simple(30)
         
         if markets:
             rows = [markets[i:i+2] for i in range(0, len(markets), 2)]
             for row in rows:
                 cols = st.columns(2)
                 for i, m in enumerate(row):
-                    # 根据市场类型选择颜色
-                    if m['type'] == 'binary':
-                        # Yes/No 市场：绿色 vs 红色
-                        color1 = "#10b981"
-                        color2 = "#ef4444"
-                    else:
-                        # 多选项市场：两个竞争者用不同颜色区分
-                        color1 = "#3b82f6"  # 蓝色
-                        color2 = "#f59e0b"  # 橙色
-                    
                     cols[i].markdown(f"""
                     <a href="https://polymarket.com/event/{m['slug']}" target="_blank" style="text-decoration:none;">
                         <div class="market-card-modern">
-                            <div class="market-head">
-                                <div class="market-title-mod">{m['title']}</div>
-                                <div class="market-vol">{m['vol_str']}</div>
-                            </div>
-                            <div class="outcome-row">
-                                <div class="outcome-box" style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2);">
-                                    <span style="color: {color1}; font-size: 0.75rem; font-weight: 600;">{m['option1']}</span>
-                                    <span style="color: {color1}; font-size: 1rem; font-weight: 700;">{m['price1']}%</span>
-                                </div>
-                                <div class="outcome-box" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2);">
-                                    <span style="color: {color2}; font-size: 0.75rem; font-weight: 600;">{m['option2']}</span>
-                                    <span style="color: {color2}; font-size: 1rem; font-weight: 700;">{m['price2']}%</span>
-                                </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div class="market-title-mod" style="flex: 1; margin-right: 10px;">{m['title']}</div>
+                                <div class="market-vol" style="font-size: 0.9rem; font-weight: 700; color: #ef4444;">{m['vol_str']}</div>
                             </div>
                         </div>
                     </a>
