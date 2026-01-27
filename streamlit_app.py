@@ -63,14 +63,15 @@ def trigger_analysis(news_title):
     st.session_state.current_market = None
     st.session_state.is_processing = False 
 
-# ================= 🎨 2. UI THEME (CSS) =================
+# ================= 🎨 2. UI THEME (RED THEME) =================
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;900&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
 
+    /* Global Background - Dark Red Tint */
     .stApp {
-        background-image: linear-gradient(rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0.95)), 
+        background-image: linear-gradient(rgba(0, 0, 0, 0.9), rgba(20, 0, 0, 0.95)), 
                           url('https://upload.cc/i1/2026/01/20/s8pvXA.jpg');
         background-size: cover;
         background-position: center;
@@ -88,7 +89,7 @@ st.markdown("""
         letter-spacing: -2px;
         margin-bottom: 5px;
         padding-top: 2vh;
-        text-shadow: 0 0 20px rgba(0,0,0,0.5);
+        text-shadow: 0 0 30px rgba(220, 38, 38, 0.6); /* Red Glow */
     }
     .hero-subtitle {
         font-family: 'Plus Jakarta Sans', sans-serif;
@@ -97,28 +98,28 @@ st.markdown("""
         text-align: center;
         margin-bottom: 30px;
         font-weight: 400;
-        min-height: 1.5em;
     }
 
     /* World Clock Styles */
     .world-clock-bar {
         display: flex; 
         justify-content: space-between; 
-        background: rgba(0,0,0,0.3); 
+        background: rgba(0,0,0,0.5); 
         padding: 8px 12px; 
         border-radius: 6px; 
         margin-bottom: 15px;
-        border: 1px solid rgba(255,255,255,0.08);
+        border: 1px solid rgba(220, 38, 38, 0.2); /* Red Border */
         font-family: 'JetBrains Mono', monospace;
     }
     .clock-item { font-size: 0.75rem; color: #9ca3af; display: flex; align-items: center; gap: 6px; }
     .clock-item b { color: #e5e7eb; font-weight: 700; }
-    .clock-time { color: #10b981; }
+    .clock-time { color: #f87171; } /* Red Time */
 
     /* News Feed Grid Cards */
     .news-grid-card {
-        background: rgba(255, 255, 255, 0.03);
+        background: rgba(20, 0, 0, 0.6);
         border: 1px solid rgba(255, 255, 255, 0.05);
+        border-left: 3px solid #dc2626; /* Strong Red Border */
         border-radius: 8px;
         padding: 15px;
         height: 100%;
@@ -126,16 +127,17 @@ st.markdown("""
         display: flex;
         flex-direction: column;
         justify-content: space-between;
-        transition: all 0.5s ease-in-out;
+        transition: all 0.3s ease-in-out;
     }
     .news-grid-card:hover {
-        background: rgba(255, 255, 255, 0.08);
-        border-color: rgba(255, 255, 255, 0.1);
+        background: rgba(40, 0, 0, 0.8);
+        border-color: #ef4444;
+        box-shadow: 0 0 15px rgba(220, 38, 38, 0.2);
         transform: translateY(-2px);
     }
     .news-meta {
         font-size: 0.7rem;
-        color: #ef4444;
+        color: #fca5a5;
         font-weight: 600;
         margin-bottom: 8px;
         display: flex;
@@ -157,40 +159,53 @@ st.markdown("""
     .market-mini-card {
         padding: 10px;
         margin-bottom: 8px;
-        background: rgba(16, 185, 129, 0.05); /* Greenish tint */
-        border: 1px solid rgba(16, 185, 129, 0.1);
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 6px;
         transition: all 0.2s;
     }
-    .market-mini-card.battleground {
-        background: rgba(245, 158, 11, 0.05); /* Orange tint */
-        border: 1px solid rgba(245, 158, 11, 0.2);
+    .market-mini-card:hover {
+        border-color: #ef4444;
+        background: rgba(40, 0, 0, 0.5);
     }
     .market-title { font-size: 0.85rem; color: #e5e7eb; margin-bottom: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .market-bar-bg { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
-    .market-bar-fill { height: 100%; border-radius: 3px; }
+    .market-bar-bg { height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; }
+    .market-bar-fill { height: 100%; border-radius: 2px; }
     .market-meta { display: flex; justify-content: space-between; font-size: 0.75rem; margin-top: 4px; color: #9ca3af; }
 
     /* Input Area */
     .stTextArea textarea {
-        background-color: rgba(31, 41, 55, 0.8) !important;
-        border: 1px solid #374151 !important;
+        background-color: rgba(20, 0, 0, 0.6) !important;
+        border: 1px solid #7f1d1d !important;
         color: white !important;
         border-radius: 12px !important;
         font-size: 1rem !important;
     }
-    div.stButton > button:first-child {
-        background: linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%) !important; /* Blue for "Analyze" */
+    .stTextArea textarea:focus {
+        border-color: #ef4444 !important;
+        box-shadow: 0 0 10px rgba(220, 38, 38, 0.4) !important;
+    }
+
+    /* RED BUTTONS - Global Override */
+    div.stButton > button {
+        background: linear-gradient(90deg, #991b1b 0%, #7f1d1d 100%) !important;
         color: white !important;
+        border: 1px solid #b91c1c !important;
         border-radius: 8px !important;
-        border: none !important;
         font-weight: 600 !important;
+        transition: all 0.3s !important;
+    }
+    div.stButton > button:hover {
+        background: linear-gradient(90deg, #dc2626 0%, #b91c1c 100%) !important;
+        box-shadow: 0 0 15px rgba(220, 38, 38, 0.6) !important;
+        border-color: #fca5a5 !important;
+        transform: scale(1.02) !important;
     }
     
     /* Analysis Result Card */
     .analysis-card {
-        background: rgba(17, 24, 39, 0.9);
-        border: 1px solid #374151;
+        background: rgba(20, 0, 0, 0.8);
+        border: 1px solid #7f1d1d;
         border-radius: 12px;
         padding: 20px;
         margin-top: 20px;
@@ -206,71 +221,87 @@ st.markdown("""
     }
     .rotation-fill {
         height: 100%;
-        background: #ef4444;
+        background: #ef4444; /* RED Fill */
         transition: width 1s linear;
-        opacity: 0.8;
+        box-shadow: 0 0 10px #ef4444;
     }
 
     /* 🔥🔥 NEW: Hub Button Styles (CSS for HTML buttons) 🔥🔥 */
     .hub-btn {
-        display: block;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
         width: 100%;
-        padding: 12px 5px;
+        height: 70px;
         background: rgba(255, 255, 255, 0.03);
         border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 8px;
+        border-radius: 10px;
         text-align: center;
         text-decoration: none;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         backdrop-filter: blur(5px);
         margin-bottom: 10px;
+        cursor: pointer;
     }
     .hub-btn:hover {
-        background: rgba(255, 255, 255, 0.08);
-        border-color: rgba(59, 130, 246, 0.5); /* Blue glow */
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+        background: rgba(40, 0, 0, 0.6);
+        border-color: #ef4444;
+        transform: translateY(-3px);
+        box-shadow: 0 5px 15px rgba(220, 38, 38, 0.3); /* RED Glow */
     }
-    .hub-emoji { font-size: 1.2rem; display: block; margin-bottom: 4px; }
-    .hub-text { font-size: 0.75rem; color: #9ca3af; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; }
-    .hub-btn:hover .hub-text { color: white; }
+    .hub-content { display: flex; flex-direction: column; align-items: center; }
+    .hub-emoji { font-size: 1.4rem; line-height: 1.2; margin-bottom: 4px; filter: grayscale(0.2); }
+    .hub-btn:hover .hub-emoji { filter: grayscale(0); transform: scale(1.1); transition: transform 0.2s;}
+    .hub-text { 
+        font-family: 'Inter', sans-serif;
+        font-size: 0.8rem; 
+        color: #d1d5db; 
+        font-weight: 600; 
+        letter-spacing: 0.5px;
+    }
+    .hub-btn:hover .hub-text { color: #ffffff; }
 
-    /* Trending Tags */
+    /* Trending Tags (Red Theme) */
     .trend-container {
         display: flex;
         flex-wrap: wrap;
-        gap: 10px;
+        gap: 12px;
         justify-content: center;
-        margin-top: 10px;
+        margin-top: 15px;
     }
     .trend-tag {
-        background: rgba(29, 155, 240, 0.1);
-        border: 1px solid rgba(29, 155, 240, 0.2);
-        color: #1d9bf0;
-        padding: 4px 12px;
-        border-radius: 20px;
+        background: rgba(20, 0, 0, 0.4);
+        border: 1px solid rgba(220, 38, 38, 0.3);
+        color: #fca5a5;
+        padding: 6px 14px;
+        border-radius: 4px;
         font-size: 0.85rem;
-        font-family: 'Inter', sans-serif;
+        font-family: 'JetBrains Mono', monospace;
         cursor: default;
         transition: all 0.3s;
+        display: flex;
+        align-items: center;
     }
     .trend-tag:hover {
-        background: rgba(29, 155, 240, 0.2);
-        box-shadow: 0 0 10px rgba(29, 155, 240, 0.2);
+        background: rgba(220, 38, 38, 0.2);
+        border-color: #ef4444;
+        box-shadow: 0 0 10px rgba(220, 38, 38, 0.3);
+        transform: scale(1.05);
     }
     .trend-vol {
         font-size: 0.7rem;
-        opacity: 0.6;
-        margin-left: 6px;
-        border-left: 1px solid rgba(255,255,255,0.2);
-        padding-left: 6px;
+        color: #9ca3af;
+        margin-left: 8px;
+        padding-left: 8px;
+        border-left: 1px solid rgba(220, 38, 38, 0.3);
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ================= 🧠 3. LOGIC CORE =================
 
-# --- A. News Logic ---
+# --- A. News Logic (缓存 5 分钟) ---
 @st.cache_data(ttl=300)
 def fetch_rss_news():
     rss_urls = [
@@ -282,6 +313,7 @@ def fetch_rss_news():
     try:
         for url in rss_urls:
             feed = feedparser.parse(url)
+            # 🔥 抓取更多：每个源抓 10 条
             for entry in feed.entries[:10]: 
                 news.append({
                     "title": entry.title,
@@ -291,23 +323,28 @@ def fetch_rss_news():
     except: pass
     return news[:30] 
 
-# --- 🔥 B. Real-Time Trends Logic (Google Trends as Proxy) ---
-# Twitter API 收费极高，使用 Google Trends RSS 作为最佳免费平替
-@st.cache_data(ttl=3600) # 1小时缓存
+# --- 🔥 B. Real-Time Trends (Google Trends RSS) ---
+# 这是一个真实的、免费的全球趋势源，替代昂贵的 Twitter API
+@st.cache_data(ttl=3600) # 缓存1小时
 def fetch_real_trends():
+    # Google Trends Daily Search Trends (US)
     url = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"
     trends = []
     try:
         feed = feedparser.parse(url)
-        for entry in feed.entries[:10]:
-            # 尝试提取热度 (approx_traffic)
-            traffic = "10K+"
+        for entry in feed.entries[:8]: # 取前8个
+            traffic = "Hot"
+            # 尝试解析 Google 的 approx_traffic
             if hasattr(entry, 'ht_approx_traffic'):
                 traffic = entry.ht_approx_traffic
             trends.append({"name": entry.title, "vol": traffic})
-    except: 
-        # Fallback if connection fails
-        trends = [{"name": "Market Crash", "vol": "500K+"}, {"name": "Bitcoin", "vol": "200K+"}]
+    except:
+        # Fallback (只有在 Google 访问失败时显示)
+        trends = [
+            {"name": "Market Crash", "vol": "1M+"}, 
+            {"name": "Bitcoin", "vol": "500K+"},
+            {"name": "AI Regulation", "vol": "200K+"}
+        ]
     return trends
 
 # --- C. Market Logic (Categorized) ---
@@ -501,7 +538,7 @@ if not st.session_state.messages:
     with col_news:
         # 顶部标题栏
         st.markdown("""
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; border-bottom:1px solid rgba(220,38,38,0.3); padding-bottom:8px;">
             <div style="font-size:0.9rem; font-weight:700; text-transform:uppercase; letter-spacing:1px;">
                 <span style="color:#ef4444">📡 Live Narrative Stream</span>
             </div>
@@ -541,7 +578,7 @@ if not st.session_state.messages:
             timer_str = f"{mins:02d}:{secs:02d}"
             
             st.markdown(f"""
-            <div style="display:flex; justify-content:flex-end; font-family:'JetBrains Mono'; font-size:0.7rem; color:#6b7280; margin-bottom:5px;">
+            <div style="display:flex; justify-content:flex-end; font-family:'JetBrains Mono'; font-size:0.7rem; color:#ef4444; margin-bottom:5px;">
                 NEXT SYNC IN: {timer_str}
             </div>
             """, unsafe_allow_html=True)
@@ -598,13 +635,31 @@ if not st.session_state.messages:
                                 </div>
                             </div>
                             """, unsafe_allow_html=True)
-                            st.link_button("🔗 Read", news['link'], use_container_width=True)
+                            
+                            # 🔥 使用 st.columns 实现双按钮，但使用 CSS 覆盖样式
+                            # 这里只保留一个 Read 链接
+                            st.markdown(f"""
+                            <a href="{news['link']}" target="_blank" style="text-decoration:none;">
+                                <div style="
+                                    background:rgba(255,255,255,0.05); 
+                                    padding:8px; 
+                                    text-align:center; 
+                                    border-radius:4px; 
+                                    font-size:0.8rem;
+                                    color:#ef4444; 
+                                    font-weight:600;
+                                    border:1px solid rgba(220,38,38,0.2);
+                                    transition:all 0.2s;">
+                                    🔗 Read Source
+                                </div>
+                            </a>
+                            """, unsafe_allow_html=True)
 
         render_news_feed()
 
     # === RIGHT: The Truth Spectrum ===
     with col_markets:
-        st.markdown('<div class="section-header"><span style="color:#10b981">💰 Market Consensus</span> <span style="font-size:0.7rem; opacity:0.7">POLYMARKET</span></div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header"><span style="color:#ef4444">💰 Market Consensus</span> <span style="font-size:0.7rem; opacity:0.7">POLYMARKET</span></div>', unsafe_allow_html=True)
         
         market_cats = fetch_categorized_markets()
         
@@ -649,11 +704,11 @@ if st.session_state.messages:
     if st.session_state.current_market:
         m = st.session_state.current_market
         st.markdown(f"""
-        <div style="background:rgba(255,255,255,0.05); border-left:4px solid #10b981; padding:15px; border-radius:8px; margin-bottom:20px;">
+        <div style="background:rgba(20,0,0,0.8); border-left:4px solid #ef4444; padding:15px; border-radius:8px; margin-bottom:20px;">
             <div style="font-size:0.8rem; color:#9ca3af">BENCHMARK MARKET</div>
             <div style="font-size:1.1rem; color:#e5e7eb; font-weight:bold">{m['title']}</div>
             <div style="display:flex; justify-content:space-between; margin-top:5px;">
-                <div style="color:#10b981; font-weight:bold">{m['odds']}</div>
+                <div style="color:#ef4444; font-weight:bold">{m['odds']}</div>
                 <div style="color:#6b7280; font-size:0.8rem">Vol: ${m['volume']:,.0f}</div>
             </div>
         </div>
@@ -699,15 +754,15 @@ if st.session_state.messages:
         st.session_state.messages = []
         st.rerun()
 
-# ================= 🌐 6. GLOBAL INTELLIGENCE FOOTER =================
+# ================= 🌐 6. GLOBAL INTELLIGENCE FOOTER (FIXED) =================
 if not st.session_state.messages:
     st.markdown("---")
     
-    # 6.1 Real-Time Trends (Google Trends via RSS)
+    # 6.1 Real-Time Google Trends (Replaces Twitter)
     st.markdown("""
     <div style="display:flex; align-items:center; justify-content:center; margin-bottom:15px; gap:8px;">
         <span style="font-size:1.2rem;">📈</span>
-        <span style="font-weight:700; color:#1d9bf0; letter-spacing:1px; font-size:0.9rem;">GLOBAL TRENDS (LIVE)</span>
+        <span style="font-weight:700; color:#ef4444; letter-spacing:1px; font-size:0.9rem;">GLOBAL SEARCH TRENDS (LIVE)</span>
     </div>
     """, unsafe_allow_html=True)
     
@@ -721,10 +776,9 @@ if not st.session_state.messages:
     st.markdown(trend_html, unsafe_allow_html=True)
     st.markdown("<br><br>", unsafe_allow_html=True)
 
-    # 6.2 Global Intelligence Hub (Safe Grid Layout)
+    # 6.2 Global Intelligence Hub (Safe Layout - No raw HTML block error)
     st.markdown('<div style="text-align:center; color:#9ca3af; margin-bottom:25px; letter-spacing:2px; font-size:0.8rem; font-weight:700;">🌐 GLOBAL INTELLIGENCE HUB</div>', unsafe_allow_html=True)
     
-    # 采用更安全的原生 columns 布局，防止 HTML 结构错误
     hub_links = [
         {"name": "Jin10", "url": "https://www.jin10.com/", "icon": "🇨🇳"},
         {"name": "WallStCN", "url": "https://wallstreetcn.com/live/global", "icon": "🇨🇳"},
@@ -738,17 +792,20 @@ if not st.session_state.messages:
         {"name": "Al Jazeera", "url": "https://www.aljazeera.com/", "icon": "🇶🇦"},
     ]
     
-    # 使用 5 列布局，分两行渲染
-    for i in range(0, len(hub_links), 5):
+    # 使用 Streamlit 原生 Columns 循环生成，避免 HTML 结构错误
+    rows = [hub_links[i:i+5] for i in range(0, len(hub_links), 5)]
+    
+    for row in rows:
         cols = st.columns(5)
-        batch = hub_links[i:i+5]
-        for j, item in enumerate(batch):
-            with cols[j]:
-                # 使用 HTML 渲染好看的卡片按钮
+        for i, item in enumerate(row):
+            with cols[i]:
+                # 单独渲染每个卡片，这样 Streamlit 能正确处理
                 st.markdown(f"""
                 <a href="{item['url']}" target="_blank" class="hub-btn">
-                    <span class="hub-emoji">{item['icon']}</span>
-                    <span class="hub-text">{item['name']}</span>
+                    <div class="hub-content">
+                        <span class="hub-emoji">{item['icon']}</span>
+                        <span class="hub-text">{item['name']}</span>
+                    </div>
                 </a>
                 """, unsafe_allow_html=True)
     
