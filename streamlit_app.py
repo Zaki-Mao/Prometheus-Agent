@@ -449,7 +449,7 @@ def fetch_polymarket_v5_simple(limit=60):
         return markets[:limit]
     except: return []
 
-# --- 🔥 D. NEW AGENT LOGIC (Dual Engine: Arb Trader vs Macro Strategist) ---
+# --- 🔥 D. NEW AGENT LOGIC (FIXED MULTI-OUTCOME PARSING) ---
 def generate_keywords(user_text):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -481,17 +481,28 @@ def search_market_data_list(user_query):
                     m = event['markets'][0]
                     if any(kw in event['title'].lower() for kw in ["china", "xi jinping", "taiwan"]): continue
 
+                    # 🔥 FIX: Handle Multi-Outcome Markets Properly
                     outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
                     prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
                     vol = float(m.get('volume', 0))
-                    odds_str = []
+                    
+                    # Create a list of (outcome, probability) tuples
+                    outcome_data = []
                     for i, out in enumerate(outcomes):
                         if i < len(prices):
                             prob = float(prices[i]) * 100
-                            odds_str.append(f"{out}: {prob:.1f}%")
+                            outcome_data.append((out, prob))
+                    
+                    # Sort by probability descending (Highest chance first)
+                    outcome_data.sort(key=lambda x: x[1], reverse=True)
+                    
+                    # Format top 3 outcomes
+                    top_odds = [f"{o}: {p:.1f}%" for o, p in outcome_data[:3]]
+                    odds_str = " | ".join(top_odds)
+
                     candidates.append({
                         "title": event['title'],
-                        "odds": " | ".join(odds_str[:4]),
+                        "odds": odds_str, # Now contains rich multi-outcome data
                         "volume": f"${vol:,.0f}",
                         "slug": slug,
                         "url": f"https://polymarket.com/event/{slug}"
@@ -502,207 +513,126 @@ def search_market_data_list(user_query):
 def is_chinese_input(text):
     return bool(re.search(r'[\u4e00-\u9fff]', text))
 
-# Helper to simulate asset prices for context (In prod, use real API)
-def get_asset_context():
-    return """
-    📊 **[Global Macro Anchors]**
-    - Gold (XAU): ~$2,350 (Safe Haven)
-    - Oil (WTI): ~$80 (Geopolitics)
-    - USD Index (DXY): ~104 (Global Liquidity)
-    """
-
 def get_agent_response(history, market_data):
     """
-    Handles the full chat conversation with DUAL ENGINE logic (Arb Trader vs Macro Strategist).
+    Handles the full chat conversation with PORTFOLIO MANAGER logic.
     """
     model = genai.GenerativeModel('gemini-2.5-flash')
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
-    macro_anchors = get_asset_context()
     
     first_query = history[0]['content'] if history else ""
     is_cn = is_chinese_input(first_query)
     
-    # === PATH A: PREDICTION MARKET FOUND (ARBITRAGE MODE) ===
+    # 1. Market Context Construction
     if market_data:
         if is_cn:
             market_context = f"""
-            ✅ **[已锁定预测市场]**
-            - **合约:** {market_data['title']}
-            - **当前赔率:** {market_data['odds']}
-            - **资金池:** {market_data['volume']}
+            ✅ **[真实资金定价] Polymarket 数据**
+            - **问题:** {market_data['title']}
+            - **当前赔率 (Top 3):** {market_data['odds']}
+            - **资金量:** {market_data['volume']}
             
-            {macro_anchors}
-            """
-            system_prompt = f"""
-            你是一位 **事件驱动型对冲基金经理 (Event-Driven PM)**，专精于 **预测市场套利 (Prediction Market Arbitrage)**。
-            当前日期: {current_date}
-            
-            **绝对指令 (NON-NEGOTIABLE):**
-            1. **禁止寒暄:** 不要说“作为一名...”，直接开始分析。
-            2. **聚焦赔率:** 既然找到了 Polymarket 合约，你的首要任务是分析赔率是否错误 (Mispricing)。
-            3. **语言强制:** **必须全程使用中文回答**。
-            4. **强制链接:** 提到标的时使用Markdown链接。
-
-            {market_context}
-            
-            --- 预测市场狙击备忘录 ---
-            
-            ### 0. 📰 事件背景速览
-            * **一句话还原**: 发生了什么？
-            
-            ### 1. 🎲 Polymarket 狙击策略 (核心)
-            * **赔率偏差**: 市场赔率(Implied Prob) vs 你的真实概率评估(True Prob)。是否存在 EV+ 机会？
-            * **交易指令**: 
-              - **买入方向**: [Yes / No]
-              - **目标赔率**: 在什么价格区间入手？
-              - **凯利公式**: 建议仓位比例 (如: 小注博弈/重注确信)。
-            
-            ### 2. 🩸 宏观逻辑校验
-            * **驱动因子**: 赔率变动背后的资金流向是什么？是聪明钱在买入还是散户FOMO？
-            * **潜在催化剂**: 未来24-48小时内什么消息会导致赔率剧烈波动？
-            
-            ### 3. 📈 关联资产对冲 (Capital Markets)
-            * **股票/Crypto**: 既然你在预测市场下注了，如何在股市/币圈放大收益或对冲风险？
-              - **标的**: [代码+链接] (如 [DJT](https://finance.yahoo.com/quote/DJT))
-              - **逻辑**: 如果预测正确，这个资产会怎么走？
-            
-            ### 4. 🏁 最终决策
-            * 一句话交易指令。
+            **指令:** 市场赔率是“聪明的钱”打出的共识。如果新闻情绪与赔率不符（例如新闻说‘大概率发生’但赔率只有20%），则存在【预期差交易机会】。
             """
         else:
             market_context = f"""
-            ✅ **[TARGET ACQUIRED: POLYMARKET CONTRACT]**
-            - **Contract:** {market_data['title']}
-            - **Odds:** {market_data['odds']}
+            ✅ **[MARKET PRICING] Polymarket Data**
+            - **Market:** {market_data['title']}
+            - **Top 3 Odds:** {market_data['odds']}
             - **Volume:** {market_data['volume']}
             
-            {macro_anchors}
+            **INSTRUCTION:** Odds represent "Smart Money". If news hype disagrees with odds, identify the **Mispricing**.
             """
-            system_prompt = f"""
-            You are an **Event-Driven Portfolio Manager** specializing in **Prediction Market Arbitrage**.
-            Current Date: {current_date}
-            
-            **STRICT RULES:**
-            1. **NO INTRO:** Start directly.
-            2. **FOCUS ON ODDS:** Your primary job is to find EV+ trades in the Polymarket contract found above.
-            3. **LANGUAGE:** English Only.
-            4. **LINKS:** Mandatory.
-
-            {market_context}
-            
-            --- ARBITRAGE MEMO ---
-            
-            ### 0. 📰 Quick Context
-            * **The Event**: De-noise the headline.
-            
-            ### 1. 🎲 Polymarket Sniper Strategy (CORE)
-            * **Mispricing**: Market Implied Prob vs. Your True Prob. Is there Positive EV?
-            * **The Trade**:
-              - **Action**: Buy [Yes / No]
-              - **Entry Zone**: Target price.
-              - **Sizing**: Kelly Criterion estimate (High/Low conviction).
-            
-            ### 2. 🩸 Logic Check
-            * **Flows**: Is Smart Money buying or Retail FOMO?
-            * **Catalyst**: What next event moves these odds?
-            
-            ### 3. 📈 Correlated Asset Hedges
-            * **Equities/Crypto**: How to leverage this view in traditional markets?
-              - **Ticker**: [Link]
-              - **Correlation**: If Polymarket bet wins, does this asset moon or tank?
-            
-            ### 4. 🏁 Final Verdict
-            * Bottom line instruction.
-            """
-
-    # === PATH B: NO MARKET FOUND (MACRO STRATEGIST MODE) ===
     else:
         if is_cn:
-            market_context = f"❌ **无直接预测市场数据**。请基于以下宏观锚点进行推演：\n{macro_anchors}"
-            system_prompt = f"""
-            你是一位 **地缘政治情报交易员 (Geopolitical Alpha Trader)**，曾任职于 Bridgewater。
-            当前日期: {current_date}
-            
-            **绝对指令:**
-            1. **禁止寒暄:** 不要说废话，直接输出报告。
-            2. **逻辑推演:** 既然没有直接的赌局，你需要寻找股市/汇市的“代理赌局” (Proxy Trades)。
-            3. **语言强制:** **必须全程使用中文回答**。
-            4. **强制链接:** 必须加链接。
-
-            {market_context}
-            
-            --- 地缘政治 Alpha 交易备忘录 ---
-            
-            ### 0. 📰 情报背景 (Context)
-            * **事实还原**: 去噪后的核心事件。
-            * **情报评级**: [高/中/低] 信号强度。
-            
-            ### 1. 🗺️ 博弈地图 (Game Theory)
-            * **关键决策者**: 谁在桌上？他们的【目标函数】是什么？
-            * **二阶效应**: 如果A发生，B会如何报复？推演博弈树。
-            
-            ### 2. 🎯 市场定价错误 (Mispricing)
-            * **当前共识**: 市场现在Price-in了什么？
-            * **预期差**: 市场忽略了哪个维度的风险或机会？
-            
-            ### 3. 📊 交易架构设计 (The Trade)
-            * **核心命题**: 一句话定义赌注。
-            * **头寸结构**:
-              - **方向性头寸 (60%)**: [标的+链接]。*入场逻辑。*
-              - **对冲头寸 (25%)**: [标的+链接]。*必须与核心逻辑自洽 (Anti-Contradiction)。*
-              - **期权/凸性 (15%)**: 捕捉尾部风险。
-            * **压力测试**: 若核心假设失效，最大回撤是多少？
-            
-            ### 4. ⚡ 执行路线图
-            * **监测**: 盯着哪个指标？
-            * **失效**: 出现什么信号说明我们错了？
-            
-            ### 5. 🚨 最终指令
-            * [做多/做空] [资产] [仓位]
-            """
+            market_context = "❌ **无直接预测市场数据**。"
         else:
-            market_context = f"❌ **NO DIRECT MARKET DATA**. Derive logic from macro anchors:\n{macro_anchors}"
-            system_prompt = f"""
-            You are a **Geopolitical Alpha Trader** (ex-Bridgewater).
-            Current Date: {current_date}
-            
-            **STRICT RULES:**
-            1. **NO INTRO:** Start directly.
-            2. **PROXY TRADES:** Since no prediction market exists, find the best "Proxy Trades" in equities/FX.
-            3. **LANGUAGE:** English Only.
-            4. **LINKS:** Mandatory.
+            market_context = "❌ **NO DIRECT MARKET DATA**."
 
-            {market_context}
+    # 2. System Prompt Selection (PM MODE v19.0)
+    if is_cn:
+        system_prompt = f"""
+        你是一位管理亿级美元资金的 **全球宏观对冲基金经理 (Global Macro PM)**。
+        当前日期: {current_date}
+        
+        **核心指令:**
+        1. **直接输出:** 不要自我介绍，不要说“作为一名基金经理”，直接开始分析。
+        2. **逻辑自洽:** 严禁逻辑断层（如看空法币却做多美元）。
+        3. **强制链接:** 提到标的时必须加链接 (如 [NVDA](https://finance.yahoo.com/quote/NVDA))。
+        4. **语言强制:** **必须全程使用中文回答**。
+
+        {market_context}
+        
+        --- 基金经理决策备忘录 ---
+        
+        ### 0. 📰 新闻背景速览 (Context)
+        * **事件还原**: 用通俗语言快速概括发生了什么（小白视角）。
+        * **背景知识**: 为什么这件事值得关注？
+        
+        ### 1. 🩸 市场定价 vs 真实逻辑 (The Disconnect)
+        * **当前共识**: 市场目前Price-in了什么？
+        * **预期差**: 你的差异化观点是什么？
+        
+        ### 2. 🕵️‍♂️ 归因与博弈 (Attribution)
+        * **驱动力**: 资金面还是基本面？
+        * **关键博弈方**: 谁获益？谁受损？
+        
+        ### 3. 🎲 压力测试与情景分析 (Stress Test)
+        * **基准情景 (60%)**: [描述] -> 资产影响。
+        * **压力测试 (20%)**: 若核心假设失效（例如利率飙升），最大回撤是多少？对冲能否覆盖？
+        
+        ### 4. 💸 交易执行 (The Trade Book)
+        * **🎯 核心多头 (Long)**:
+            * **标的**: [代码+链接]
+            * **头寸**: 建议仓位。
+            * **逻辑**: 为什么买它？
+        * **📉 核心空头/对冲 (Short/Hedge)**:
+            * **标的**: [代码+链接]
+            * **逻辑**: 对冲什么风险？
+        * **⏳ 期限**: 持仓多久？
             
-            --- Geopolitical Alpha Trade Memo ---
+        ### 5. 🏁 最终指令 (PM Conclusion)
+        * 一句话总结交易方向。
+        """
+    else:
+        system_prompt = f"""
+        You are a **Global Macro Portfolio Manager (PM)**.
+        Current Date: {current_date}
+        
+        **INSTRUCTIONS:**
+        1. **DIRECT START:** Do NOT introduce yourself. Start immediately with the analysis.
+        2. **LOGIC:** Maintain strict logical consistency.
+        3. **LINKS:** Link all tickers (e.g. [AAPL](https://finance.yahoo.com/quote/AAPL)).
+        4. **LANGUAGE:** English Only.
+
+        {market_context}
+        
+        --- INVESTMENT MEMORANDUM ---
+        
+        ### 1. 📰 Context & Background
+        * **What Happened**: Simple explanation for general audience.
+        * **Why it Matters**: Historical context.
+        
+        ### 2. 🩸 Consensus vs. Reality (The Disconnect)
+        * **Priced In**: What is the market pricing?
+        * **The Edge**: What is the market missing?
+        
+        ### 3. 🕵️‍♂️ Attribution & Game Theory
+        * **Drivers**: Fundamental or Flow?
+        * **Cui Bono**: Who benefits?
+        
+        ### 4. 🎲 Stress Test & Scenarios
+        * **Base Case**: Impact.
+        * **Stress Test**: What if you are wrong? (Drawdown risk).
+        
+        ### 5. 💸 The Trade Book (Execution)
+        * **🎯 Top Longs**: [Ticker+Link] & Thesis.
+        * **📉 Shorts / Hedges**: [Ticker+Link] & Rationale.
+        * **⏳ Structure**: Duration/Instrument.
             
-            ### 0. 📰 Intelligence Context
-            * **Fact Check**: De-noise the event.
-            * **Rating**: [High/Med/Low] Signal Strength.
-            
-            ### 1. 🗺️ Game Theory Map
-            * **Players**: Who matters? What are their incentives?
-            * **Second-Order**: If A happens, what does B do?
-            
-            ### 2. 🎯 Market Mispricing
-            * **Consensus**: What is priced in?
-            * **The Gap**: What is the market missing?
-            
-            ### 3. 📊 Trade Architecture
-            * **Thesis**: One sentence bet.
-            * **Positions**:
-              - **Directional (60%)**: [Ticker+Link]. *Logic.*
-              - **Hedge (25%)**: [Ticker+Link]. *Must be consistent.*
-              - **Convexity (15%)**: Tail risk options.
-            * **Stress Test**: Drawdown risk if thesis fails.
-            
-            ### 4. ⚡ Execution
-            * **Watch**: Key indicators.
-            * **Invalidation**: When to fold?
-            
-            ### 5. 🚨 Final Order
-            * [Long/Short] [Asset] [Size]
-            """
+        ### 6. 🏁 PM Conclusion
+        * Bottom line instruction.
+        """
     
     api_messages = [{"role": "user", "parts": [system_prompt]}]
     for msg in history:
