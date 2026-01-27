@@ -292,12 +292,12 @@ st.markdown("""
     }
     .hub-btn:hover .hub-text { color: #ffffff; }
     
-    /* Trend Tags (New Style) */
+    /* Trend Tags (Fixed Buttons) */
     .trend-container { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; }
     .trend-btn {
         background: rgba(220, 38, 38, 0.15);
         color: #fca5a5;
-        padding: 6px 12px;
+        padding: 6px 14px;
         border-radius: 6px;
         font-size: 0.8rem;
         text-decoration: none;
@@ -306,6 +306,7 @@ st.markdown("""
         display: flex;
         align-items: center;
         gap: 6px;
+        font-weight: 600;
     }
     .trend-btn:hover {
         background: rgba(220, 38, 38, 0.4);
@@ -313,22 +314,25 @@ st.markdown("""
         border-color: #ef4444;
         transform: scale(1.02);
     }
+    .ex-link {
+        font-size: 0.7rem; color: #6b7280; text-decoration: none; margin-top: 5px; display: block; text-align: right;
+    }
+    .ex-link:hover { color: #ef4444; }
 </style>
 """, unsafe_allow_html=True)
 
 # ================= 🧠 5. LOGIC CORE =================
 
-# --- 🔥 A. Crypto Prices (Extended List 20+) ---
+# --- 🔥 A. Crypto Prices (Massively Expanded) ---
 @st.cache_data(ttl=60)
 def fetch_crypto_prices():
-    """获取更多主流加密货币实时价格，填满左侧列表"""
+    """获取更多主流加密货币实时价格"""
     # 扩充监控列表
     symbols = [
         "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", 
-        "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "TRXUSDT", "DOTUSDT", 
-        "LINKUSDT", "MATICUSDT", "LTCUSDT", "SHIBUSDT", "BCHUSDT", 
-        "ATOMUSDT", "UNIUSDT", "XLMUSDT", "ETCUSDT", "FILUSDT",
-        "NEARUSDT", "APTUSDT", "ARBUSDT", "OPUSDT" 
+        "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "SHIBUSDT", "DOTUSDT", 
+        "LINKUSDT", "TRXUSDT", "MATICUSDT", "LTCUSDT", "BCHUSDT", 
+        "UNIUSDT"
     ]
     crypto_data = []
     
@@ -365,7 +369,7 @@ def fetch_crypto_prices():
     except:
         pass 
 
-    # Fallback
+    # Robust Fallback if API fails
     if not crypto_data:
         crypto_data = [
             {"symbol": "BTC", "price": "$94,250", "change": 2.3, "volume": "25.5B", "trend": "up"},
@@ -374,7 +378,7 @@ def fetch_crypto_prices():
             {"symbol": "BNB", "price": "$612", "change": 0.8, "volume": "1.2B", "trend": "up"}
         ]
     
-    return crypto_data # Return ALL, no slicing
+    return crypto_data
 
 # --- 🔥 B. Categorized News Fetcher ---
 @st.cache_data(ttl=300)
@@ -418,13 +422,11 @@ def fetch_categorized_news():
         "web3": fetch_rss(feeds["web3"], 20)
     }
 
-# --- C. Real-Time Trends (Buttons) ---
-# Removed fetch_real_trends dynamic logic, replaced with static buttons in UI
-
-# --- 🔥 D. Polymarket - 交易量排序 + 比例修正 ---
+# --- 🔥 D. Polymarket - 严格数据清洗 (Yes/No Only) ---
 @st.cache_data(ttl=60)
 def fetch_top_polymarkets(sort_by="volume", limit=20):
     try:
+        # 获取更多事件以进行过滤
         url = "https://gamma-api.polymarket.com/events?limit=100&closed=false"
         resp = requests.get(url, timeout=5).json()
         markets = []
@@ -432,18 +434,24 @@ def fetch_top_polymarkets(sort_by="volume", limit=20):
             for event in resp:
                 try:
                     m = event.get('markets', [])[0]
-                    prices = json.loads(m.get('outcomePrices'))
-                    outcomes = json.loads(m.get('outcomes'))
+                    
+                    # 1. 检查 Outcome 是否是纯粹的 ["Yes", "No"]
+                    # 很多市场是多选项(Categorical)，这会导致数据错位，必须过滤
+                    outcomes_raw = m.get('outcomes')
+                    outcomes = json.loads(outcomes_raw) if isinstance(outcomes_raw, str) else outcomes_raw
+                    
+                    if outcomes != ["Yes", "No"]:
+                        continue # 跳过非二元市场，保证数据准确
+                        
+                    prices_raw = m.get('outcomePrices')
+                    prices = json.loads(prices_raw) if isinstance(prices_raw, str) else prices_raw
                     vol = float(m.get('volume', 0))
                     
-                    if len(prices) == 2 and "Yes" in outcomes and "No" in outcomes and vol > 0:
-                        yes_idx = outcomes.index("Yes")
-                        no_idx = outcomes.index("No")
+                    if len(prices) == 2 and vol > 0:
+                        yes_price = float(prices[0]) * 100
+                        no_price = float(prices[1]) * 100
                         
-                        yes_price = float(prices[yes_idx]) * 100
-                        no_price = float(prices[no_idx]) * 100
-                        
-                        # Data Cleaning: Filter dead markets
+                        # 2. 再次校验价格合理性 (防止死盘)
                         if 95 <= (yes_price + no_price) <= 105:
                             markets.append({
                                 "title": event.get('title'),
@@ -455,6 +463,7 @@ def fetch_top_polymarkets(sort_by="volume", limit=20):
                             })
                 except: continue
         
+        # 强制按交易量降序
         markets.sort(key=lambda x: x['volume'], reverse=True)
         return markets[:limit]
     except: return []
@@ -508,7 +517,7 @@ if not st.session_state.messages:
         </div>
         """, unsafe_allow_html=True)
 
-        # 🔥 Global Trends Buttons (Fixed Links)
+        # 🔥 Global Trends Buttons (Fixed Static Links)
         trend_html = """
         <div class="trend-container">
             <a href="https://trends.google.com/trending?geo=US" target="_blank" class="trend-btn">📈 Google Trends</a>
@@ -547,7 +556,7 @@ if not st.session_state.messages:
 </div>
 """, unsafe_allow_html=True)
 
-            # Web3 (Crypto) Logic - 扩充到20个
+            # Web3 (Crypto) Logic - 扩充到16个以上
             if st.session_state.news_category == "web3":
                 data = fetch_crypto_prices()
                 if data:
@@ -566,6 +575,9 @@ if not st.session_state.messages:
                                     <span style="color:#fbbf24; font-weight:700; font-family:'JetBrains Mono';">{coin['price']}</span>
                                     <span style="color:#9ca3af; font-size:0.8rem;">Vol: {coin['volume']}</span>
                                 </div>
+                                <div style="margin-top:8px; text-align:right;">
+                                    <a href="https://www.binance.com/en/trade/{coin['symbol']}_USDT" target="_blank" style="text-decoration:none; color:#ef4444; font-size:0.7rem;">Trade →</a>
+                                </div>
                             </div>
                             """, unsafe_allow_html=True)
                 else:
@@ -575,7 +587,6 @@ if not st.session_state.messages:
                 all_news = fetch_categorized_news()
                 news_list = all_news.get(st.session_state.news_category, all_news['all'])
                 if news_list:
-                    # 显示更多新闻以匹配高度
                     rows = [news_list[i:i+2] for i in range(0, min(len(news_list), 20), 2)]
                     for row in rows:
                         cols = st.columns(2)
