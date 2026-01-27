@@ -144,7 +144,7 @@ st.markdown("""
         display: flex;
         flex-direction: column;
         justify-content: space-between;
-        transition: all 0.5s ease-in-out; /* 增加过渡动画 */
+        transition: all 0.5s ease-in-out;
     }
     .news-grid-card:hover {
         background: rgba(255, 255, 255, 0.08);
@@ -214,10 +214,10 @@ st.markdown("""
         margin-top: 20px;
     }
     
-    /* Rotation Progress Bar */
+    /* Rotation Progress Bar (Minimal) */
     .rotation-bar {
-        height: 2px;
-        background: rgba(255,255,255,0.1);
+        height: 1px;
+        background: rgba(255,255,255,0.05);
         margin-bottom: 10px;
         overflow: hidden;
     }
@@ -225,6 +225,54 @@ st.markdown("""
         height: 100%;
         background: #ef4444;
         transition: width 1s linear;
+        opacity: 0.7;
+    }
+
+    /* 🔥 NEW: Advanced Footer Hub Styles */
+    .hub-grid {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 15px;
+        margin-bottom: 30px;
+    }
+    @media (max-width: 800px) { .hub-grid { grid-template-columns: repeat(2, 1fr); } }
+
+    .hub-card {
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 10px;
+        padding: 15px;
+        text-align: center;
+        text-decoration: none;
+        color: #9ca3af !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 80px;
+    }
+    .hub-card:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(59, 130, 246, 0.5); /* Blue glow */
+        color: #ffffff !important;
+        transform: translateY(-3px);
+        box-shadow: 0 10px 20px -10px rgba(59, 130, 246, 0.3);
+    }
+    .hub-icon { font-size: 1.5rem; margin-bottom: 5px; filter: grayscale(100%); transition: all 0.3s;}
+    .hub-card:hover .hub-icon { filter: grayscale(0%); transform: scale(1.1); }
+    .hub-name { font-size: 0.8rem; font-weight: 600; letter-spacing: 0.5px; }
+
+    /* Trending List */
+    .trend-item {
+        font-family: 'Courier New', monospace;
+        font-size: 0.85rem;
+        color: #3b82f6;
+        padding: 4px 8px;
+        border-radius: 4px;
+        background: rgba(59, 130, 246, 0.1);
+        margin-right: 8px;
+        display: inline-block;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -243,7 +291,7 @@ def fetch_rss_news():
     try:
         for url in rss_urls:
             feed = feedparser.parse(url)
-            # 🔥 抓取更多：每个源抓 10 条，保证有足够内容轮播
+            # 🔥 抓取更多：每个源抓 10 条
             for entry in feed.entries[:10]: 
                 news.append({
                     "title": entry.title,
@@ -251,7 +299,6 @@ def fetch_rss_news():
                     "link": entry.link
                 })
     except: pass
-    # 返回最多 30 条混合新闻
     return news[:30] 
 
 # --- B. Market Logic (Categorized) ---
@@ -441,7 +488,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 if not st.session_state.messages:
     col_news, col_markets = st.columns([1, 1], gap="large")
 
-    # === LEFT: Live Noise Stream (Auto-Refreshing + Rotating) ===
+    # === LEFT: Live Noise Stream (Auto-Refreshing) ===
     with col_news:
         # 顶部标题栏
         st.markdown("""
@@ -453,15 +500,12 @@ if not st.session_state.messages:
                 ● LIVE
             </div>
         </div>
-        <div style="font-size:0.7rem; color:#6b7280; margin-bottom:15px; font-style:italic;">
-            Sources: Reuters • TechCrunch • CoinDesk
-        </div>
         <style>
             @keyframes pulse { 0% {opacity: 1;} 50% {opacity: 0.4;} 100% {opacity: 1;} }
         </style>
         """, unsafe_allow_html=True)
 
-        # 🔥 核心修改：每 1 秒刷新UI
+        # 🔥 核心修改：使用 st.fragment 实现局部自动刷新 (每 1 秒刷新时间)
         @st.fragment(run_every=1)
         def render_news_feed():
             # 1. 渲染全球时间
@@ -482,50 +526,38 @@ if not st.session_state.messages:
             </div>
             """, unsafe_allow_html=True)
 
-            # 2. 获取新闻 (缓存300s，含30条数据)
+            # 2. 获取新闻 (缓存300s)
             all_news = fetch_rss_news()
             
-            # 3. 🔥 轮播逻辑 (Carousel)
-            # 每 15 秒轮换一次
+            # 3. 轮播逻辑
             rotation_interval = 15
             current_timestamp = int(time.time())
             
-            # 计算当前是第几批
-            # 假设每页显示 6 条 (3行 x 2列)
-            items_per_page = 6
-            total_items = len(all_news)
-            
-            if total_items == 0:
+            if not all_news:
                 st.info("Scanning global feeds...")
                 return
 
-            # 使用取模运算实现无限循环轮播
+            items_per_page = 6
+            total_items = len(all_news)
             batch_index = (current_timestamp // rotation_interval) % (total_items // items_per_page + 1)
             start_idx = batch_index * items_per_page
             end_idx = start_idx + items_per_page
             
-            # 截取当前需要显示的新闻
             visible_news = all_news[start_idx:end_idx]
-            
-            # 如果截取为空(刚好到底)，重置回第一批
             if not visible_news:
                 visible_news = all_news[:items_per_page]
 
-            # 4. 轮播倒计时条 (Visual Progress Bar)
+            # 4. 轮播进度条 (去除文字，只留条)
             seconds_in_cycle = current_timestamp % rotation_interval
             progress_pct = (seconds_in_cycle / rotation_interval) * 100
             
             st.markdown(f"""
-            <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:5px;">
-                <span style="font-size:0.7rem; color:#6b7280;">Auto-rotating feed ({start_idx+1}-{min(end_idx, total_items)} of {total_items})</span>
-            </div>
             <div class="rotation-bar">
                 <div class="rotation-fill" style="width: {progress_pct}%;"></div>
             </div>
             """, unsafe_allow_html=True)
 
-            # 5. 渲染新闻卡片 Grid
-            # 将 visible_news 分成每行2个
+            # 5. 渲染双列新闻网格
             rows = [visible_news[i:i+2] for i in range(0, len(visible_news), 2)]
             
             for row in rows:
@@ -594,7 +626,6 @@ if not st.session_state.messages:
 if st.session_state.messages:
     st.markdown("---")
     
-    # 顶部：Show context card if available
     if st.session_state.current_market:
         m = st.session_state.current_market
         st.markdown(f"""
@@ -608,7 +639,6 @@ if st.session_state.messages:
         </div>
         """, unsafe_allow_html=True)
 
-    # 显示 AI 回复
     for msg in st.session_state.messages:
         if msg['role'] == 'assistant':
             text = msg['content']
@@ -652,22 +682,51 @@ if st.session_state.messages:
 # ================= 🌐 6. GLOBAL NEWS FOOTER =================
 if not st.session_state.messages:
     st.markdown("---")
-    st.markdown('<div style="text-align:center; color:#9ca3af; margin-bottom:20px; letter-spacing:1px;">🌐 GLOBAL INTELLIGENCE HUB</div>', unsafe_allow_html=True)
     
-    c1, c2, c3, c4, c5 = st.columns(5)
-    with c1: st.link_button("🇨🇳 Jin10 (金十)", "https://www.jin10.com/", use_container_width=True)
-    with c2: st.link_button("🇨🇳 WallstreetCN", "https://wallstreetcn.com/live/global", use_container_width=True)
-    with c3: st.link_button("🇸🇬 Zaobao", "https://www.zaobao.com.sg/realtime/world", use_container_width=True)
-    with c4: st.link_button("🇭🇰 SCMP", "https://www.scmp.com/", use_container_width=True)
-    with c5: st.link_button("🇯🇵 Nikkei Asia", "https://asia.nikkei.com/", use_container_width=True)
+    # 1. Global Intelligence Hub (Advanced UI)
+    st.markdown('<div style="text-align:center; color:#9ca3af; margin-bottom:25px; letter-spacing:2px; font-size:0.8rem; font-weight:700;">🌐 GLOBAL INTELLIGENCE HUB</div>', unsafe_allow_html=True)
     
+    # 定义新闻源数据
+    hub_links = [
+        {"name": "Jin10", "url": "https://www.jin10.com/", "icon": "🇨🇳"},
+        {"name": "WallStCN", "url": "https://wallstreetcn.com/live/global", "icon": "🇨🇳"},
+        {"name": "Reuters", "url": "https://www.reuters.com/", "icon": "🇬🇧"},
+        {"name": "Bloomberg", "url": "https://www.bloomberg.com/", "icon": "🇺🇸"},
+        {"name": "TechCrunch", "url": "https://techcrunch.com/", "icon": "🇺🇸"},
+        {"name": "CoinDesk", "url": "https://www.coindesk.com/", "icon": "🪙"},
+        {"name": "Nikkei", "url": "https://asia.nikkei.com/", "icon": "🇯🇵"},
+        {"name": "Al Jazeera", "url": "https://www.aljazeera.com/", "icon": "🇶🇦"},
+        {"name": "SCMP", "url": "https://www.scmp.com/", "icon": "🇭🇰"},
+        {"name": "Zaobao", "url": "https://www.zaobao.com.sg/realtime/world", "icon": "🇸🇬"},
+    ]
+    
+    # 渲染 Grid
+    # 使用 HTML 直接生成 Grid 布局，比 st.columns 更灵活可控
+    cards_html = ""
+    for item in hub_links:
+        cards_html += f"""
+        <a href="{item['url']}" target="_blank" class="hub-card">
+            <div class="hub-icon">{item['icon']}</div>
+            <div class="hub-name">{item['name']}</div>
+        </a>
+        """
+    
+    st.markdown(f'<div class="hub-grid">{cards_html}</div>', unsafe_allow_html=True)
+    
+    # 2. Twitter Trends (Mock Data for Visuals)
     st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown('<div style="text-align:center; color:#9ca3af; margin-bottom:15px; letter-spacing:2px; font-size:0.8rem; font-weight:700;">🐦 TWITTER TRENDING (24H)</div>', unsafe_allow_html=True)
     
-    d1, d2, d3, d4, d5 = st.columns(5)
-    with d1: st.link_button("🇺🇸 Bloomberg", "https://www.bloomberg.com/", use_container_width=True)
-    with d2: st.link_button("🇬🇧 Reuters", "https://www.reuters.com/", use_container_width=True)
-    with d3: st.link_button("🇺🇸 TechCrunch", "https://techcrunch.com/", use_container_width=True)
-    with d4: st.link_button("🪙 CoinDesk", "https://www.coindesk.com/", use_container_width=True)
-    with d5: st.link_button("🇶🇦 Al Jazeera", "https://www.aljazeera.com/", use_container_width=True)
+    # 模拟数据 (可替换为真实 API 抓取)
+    trends = [
+        "#DeepSeek", "$BTC", "Taiwan", "OpenAI", 
+        "Nvidia", "#ww3", "Powell", "TikTokBan"
+    ]
+    
+    trend_html = ""
+    for t in trends:
+        trend_html += f'<span class="trend-item">{t}</span>'
+        
+    st.markdown(f'<div style="text-align:center; opacity:0.8;">{trend_html}</div>', unsafe_allow_html=True)
     
     st.markdown("<br><br>", unsafe_allow_html=True)
