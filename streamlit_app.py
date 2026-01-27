@@ -498,23 +498,49 @@ def process_polymarket_event(event):
     except: return None
 
 @st.cache_data(ttl=60)
-def fetch_polymarket_v5_simple(limit=60):
-    """Fetch Top Markets for Homepage (Safe Limit + Local Sort)"""
+def fetch_polymarket_v5_simple(limit=60, sort_mode='volume'):
+    """
+    Fetch Top Markets for Homepage.
+    Supports server-side sorting for Volume vs Activity.
+    """
     try:
-        # Revert to safe limit=100 and local sort to fix "Loading..." issue
-        url = "https://gamma-api.polymarket.com/events?limit=100&closed=false"
-        resp = requests.get(url, timeout=8).json()
+        # Construct URL based on Sort Mode
+        # Polymarket API (Gamma) sort param: 'volume' or 'liquidity' (proxy for activity)
+        base_url = "https://gamma-api.polymarket.com/events?closed=false"
+        
+        if sort_mode == 'volume':
+            # Try to force Volume Sort (High Volume, All Time)
+            api_url = f"{base_url}&limit=60&sort=volume"
+        else:
+            # Default/Activity Sort (Trending/Liquidity)
+            api_url = f"{base_url}&limit=60&sort=liquidity"
+
+        resp = requests.get(api_url, timeout=10) # Increased timeout slightly
+        
+        if resp.status_code != 200:
+            # FALLBACK: If sorted API fails, fetch default list and sort locally
+            # This prevents "Loading..." hang
+            api_url = f"{base_url}&limit=100" 
+            resp = requests.get(api_url, timeout=10)
+
+        data = resp.json()
         markets = []
         
-        if isinstance(resp, list):
-            for event in resp:
+        if isinstance(data, list):
+            for event in data:
                 market_data = process_polymarket_event(event)
                 if market_data:
                     markets.append(market_data)
         
-        markets.sort(key=lambda x: x['volume'], reverse=True)
+        # Local Sort to ensure correct ordering even if API fallback used
+        if sort_mode == 'volume':
+            markets.sort(key=lambda x: x['volume'], reverse=True)
+        # For 'active', we assume the default API order (trending) is best, 
+        # or we could sort by volume/liquidity mix, but default is usually fine.
+            
         return markets[:limit]
-    except: return []
+    except Exception as e:
+        return []
 
 def search_market_data_list(user_query):
     """Search Markets by Keyword"""
@@ -799,7 +825,10 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
                         st.progress(market['no_price'] / 100)
                         st.caption(f"No: {market['no_price']:.1f}%")
                 else:
-                    sorted_opts = sorted(market.get('options', []), key=lambda x: x.get('price', 0), reverse=True)[:3]
+                    try:
+                        sorted_opts = sorted(market.get('options', []), key=lambda x: x.get('price', 0), reverse=True)[:3]
+                    except: sorted_opts = []
+                    
                     for opt in sorted_opts:
                         c1, c2 = st.columns([1, 4])
                         with c1:
@@ -929,10 +958,15 @@ if not st.session_state.messages and st.session_state.search_stage == "input":
         st.markdown('<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid rgba(220,38,38,0.3); padding-bottom:8px;"><span style="font-size:0.9rem; font-weight:700; color:#ef4444;">💰 PREDICTION MARKETS (TOP VOLUME)</span></div>', unsafe_allow_html=True)
         
         sc1, sc2 = st.columns(2)
-        if sc1.button("💵 Volume", use_container_width=True): st.session_state.market_sort = "volume"
-        if sc2.button("🔥 Activity", use_container_width=True): st.session_state.market_sort = "active"
+        if sc1.button("💵 Volume", use_container_width=True): 
+            st.session_state.market_sort = "volume"
+            st.rerun() # Force Rerun to refresh list
+        if sc2.button("🔥 Activity", use_container_width=True): 
+            st.session_state.market_sort = "active"
+            st.rerun() # Force Rerun to refresh list
         
-        markets = fetch_polymarket_v5_simple(60)
+        # Pass sort_mode to fetcher
+        markets = fetch_polymarket_v5_simple(60, sort_mode=st.session_state.market_sort)
         
         if markets:
             rows = [markets[i:i+2] for i in range(0, len(markets), 2)]
