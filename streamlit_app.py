@@ -405,73 +405,41 @@ def fetch_categorized_news_v2():
     }
     return {k: fetch_rss(v, 30) for k, v in feeds.items()}
 
-# --- 🔥 C. Polymarket Fetcher (Unified Logic) ---
-# 统一的Polymarket数据处理逻辑 - 解决乱码和解析一致性
+# --- 🔥 C. Polymarket Fetcher (UNIFIED & ROBUST) ---
 def process_polymarket_event(event):
-    """处理单个Polymarket事件，返回标准化数据结构"""
+    """
+    Core function to process ANY Polymarket event.
+    Handles both 'Binary' (Yes/No) and 'Multiple Choice' markets.
+    Returns None if the market should be filtered out.
+    """
     try:
         title = event.get('title', 'Untitled').strip()
         if not title: return None
         
-        # 敏感词过滤
+        # 1. Sensitive Keyword Filter
         SENSITIVE_KEYWORDS = ["china", "chinese", "xi jinping", "taiwan", "ccp", "beijing", "hong kong", "communist"]
         if any(kw in title.lower() for kw in SENSITIVE_KEYWORDS): return None
 
-        # 状态过滤
+        # 2. Status Filter
         if event.get('closed') is True: return None
         if not event.get('markets'): return None
         
-        # 寻找流动性最好的市场作为主市场
+        # 3. Find Main Market (Highest Volume)
         markets_list = event.get('markets', [])
-        # 优先排序: 交易量大 > 0
         markets_list.sort(key=lambda x: float(x.get('volume', 0)), reverse=True)
         m = markets_list[0]
         
         vol = float(m.get('volume', 0))
-        if vol < 1000: return None # 过滤死盘
+        if vol < 1000: return None # Filter Dead Markets
         
         if vol >= 1000000: vol_str = f"${vol/1000000:.1f}M"
         elif vol >= 1000: vol_str = f"${vol/1000:.0f}K"
         else: vol_str = f"${vol:.0f}"
 
-        # 解析赔率（兼容多选项）
+        # 4. Parse Odds (Robust)
         outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
         prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
         
-        # 收集所有子市场详情，用于搜索后的详情页展示
-        all_sub_markets = []
-        for sub_m in markets_list[:5]: # 只取前5个子市场避免过多
-            try:
-                sub_out = json.loads(sub_m.get('outcomes')) if isinstance(sub_m.get('outcomes'), str) else sub_m.get('outcomes')
-                sub_pri = json.loads(sub_m.get('outcomePrices')) if isinstance(sub_m.get('outcomePrices'), str) else sub_m.get('outcomePrices')
-                sub_vol = float(sub_m.get('volume', 0))
-                
-                # 构建子市场数据
-                sub_data = {
-                    "question": sub_m.get('question', title),
-                    "volume": sub_vol,
-                    "type": "binary" if len(sub_out) == 2 else "multiple",
-                    "options": []
-                }
-                
-                # Binary Map
-                if len(sub_out) == 2 and "Yes" in sub_out and "No" in sub_out:
-                    y_idx = sub_out.index("Yes")
-                    n_idx = sub_out.index("No")
-                    sub_data['yes_price'] = float(sub_pri[y_idx]) * 100 if y_idx < len(sub_pri) else 0
-                    sub_data['no_price'] = float(sub_pri[n_idx]) * 100 if n_idx < len(sub_pri) else 0
-                else:
-                    # Multi Map
-                    for i, o in enumerate(sub_out):
-                        if i < len(sub_pri):
-                            sub_data['options'].append({
-                                "option": str(o), 
-                                "price": float(sub_pri[i]) * 100
-                            })
-                all_sub_markets.append(sub_data)
-            except: continue
-
-        # 生成主列表显示的 Odds 字符串 (Top 3 of Main Market)
         outcome_data = []
         if outcomes and prices:
             for i, out in enumerate(outcomes):
@@ -481,10 +449,42 @@ def process_polymarket_event(event):
                         outcome_data.append((str(out), prob))
                     except: continue
         
-        # 按概率降序
+        if not outcome_data: return None
+
+        # Sort by Probability
         outcome_data.sort(key=lambda x: x[1], reverse=True)
         top_odds = [f"{o}: {p:.1f}%" for o, p in outcome_data[:3]]
         odds_str = " | ".join(top_odds)
+
+        # 5. Extract Details for All Sub-Markets (For Detail View)
+        all_sub_markets = []
+        for sub_m in markets_list[:5]: # Cap at 5 sub-markets
+            try:
+                sub_out = json.loads(sub_m.get('outcomes')) if isinstance(sub_m.get('outcomes'), str) else sub_m.get('outcomes')
+                sub_pri = json.loads(sub_m.get('outcomePrices')) if isinstance(sub_m.get('outcomePrices'), str) else sub_m.get('outcomePrices')
+                sub_vol = float(sub_m.get('volume', 0))
+                
+                sub_data = {
+                    "question": sub_m.get('question', title),
+                    "volume": sub_vol,
+                    "type": "binary" if len(sub_out) == 2 else "multiple",
+                    "options": []
+                }
+                
+                if len(sub_out) == 2 and "Yes" in sub_out and "No" in sub_out:
+                    y_idx = sub_out.index("Yes")
+                    n_idx = sub_out.index("No")
+                    sub_data['yes_price'] = float(sub_pri[y_idx]) * 100 if y_idx < len(sub_pri) else 0
+                    sub_data['no_price'] = float(sub_pri[n_idx]) * 100 if n_idx < len(sub_pri) else 0
+                else:
+                    for i, o in enumerate(sub_out):
+                        if i < len(sub_pri):
+                            sub_data['options'].append({
+                                "option": str(o), 
+                                "price": float(sub_pri[i]) * 100
+                            })
+                all_sub_markets.append(sub_data)
+            except: continue
 
         return {
             "title": title,
@@ -493,15 +493,16 @@ def process_polymarket_event(event):
             "vol_str": vol_str,
             "odds": odds_str,
             "url": f"https://polymarket.com/event/{event.get('slug', '')}",
-            "markets": all_sub_markets # 包含详细子市场数据
+            "markets": all_sub_markets
         }
-    except Exception as e:
-        return None
+    except: return None
 
 @st.cache_data(ttl=60)
 def fetch_polymarket_v5_simple(limit=60):
+    """Fetch Top Markets for Homepage"""
     try:
-        url = "https://gamma-api.polymarket.com/events?limit=200&closed=false"
+        # Fetch more to allow for filtering
+        url = "https://gamma-api.polymarket.com/events?limit=100&closed=false"
         resp = requests.get(url, timeout=8).json()
         markets = []
         
@@ -515,9 +516,43 @@ def fetch_polymarket_v5_simple(limit=60):
         return markets[:limit]
     except: return []
 
-# --- 🔥 D. NEW AGENT LOGIC (Unified Search + Deep Analysis) ---
+def search_market_data_list(user_query):
+    """Search Markets by Keyword"""
+    if not EXA_AVAILABLE or not EXA_API_KEY: return []
+    candidates = []
+    try:
+        exa = Exa(EXA_API_KEY)
+        # Force English keywords for better search
+        keywords = generate_keywords(user_query) 
+        
+        search_resp = exa.search(
+            f"site:polymarket.com {keywords}",
+            num_results=15, # Increased from 5 to 15
+            type="neural",
+            include_domains=["polymarket.com"]
+        )
+        
+        seen_slugs = set()
+        for result in search_resp.results:
+            match = re.search(r'polymarket\.com/event/([^/]+)', result.url)
+            if match:
+                slug = match.group(1)
+                if slug in seen_slugs: continue
+                seen_slugs.add(slug)
+                
+                api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
+                data = requests.get(api_url, timeout=5).json()
+                
+                if data and isinstance(data, list):
+                    # Use the UNIFIED processor
+                    market_data = process_polymarket_event(data[0])
+                    if market_data:
+                        candidates.append(market_data)
+    except: pass
+    return candidates[:10]
+
+# --- 🔥 D. AGENT LOGIC (Dual Engine) ---
 def generate_keywords(user_text):
-    """Generate ENGLISH keywords for search"""
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         prompt = f"Extract 2-3 most critical keywords from this news to search on a prediction market. **CRITICAL: Translate keywords to English if input is Chinese.** Return ONLY keywords separated by spaces. Input: {user_text}"
@@ -525,56 +560,22 @@ def generate_keywords(user_text):
         return resp.text.strip()
     except: return user_text
 
-def search_market_data_list(user_query):
-    """搜索Polymarket，返回列表"""
-    if not EXA_AVAILABLE or not EXA_API_KEY: return []
-    candidates = []
-    try:
-        exa = Exa(EXA_API_KEY)
-        keywords = generate_keywords(user_query) # Force English Keywords
-        search_resp = exa.search(
-            f"site:polymarket.com {keywords}",
-            num_results=5,
-            type="neural",
-            include_domains=["polymarket.com"]
-        )
-        for result in search_resp.results:
-            match = re.search(r'polymarket\.com/event/([^/]+)', result.url)
-            if match:
-                slug = match.group(1)
-                api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
-                data = requests.get(api_url, timeout=5).json()
-                if data and isinstance(data, list):
-                    # 使用与首页完全一致的解析逻辑，包含 `markets` 字段
-                    market_data = process_polymarket_event(data[0])
-                    if market_data:
-                        candidates.append(market_data)
-    except: pass
-    return candidates
-
 def is_chinese_input(text):
     return bool(re.search(r'[\u4e00-\u9fff]', text))
 
 def get_agent_response(history, market_data):
-    """
-    Handles the full chat conversation with PORTFOLIO MANAGER logic.
-    """
     model = genai.GenerativeModel('gemini-2.5-flash')
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
-    
     first_query = history[0]['content'] if history else ""
     is_cn = is_chinese_input(first_query)
     
     # 1. Market Context Construction
     if market_data:
-        # 确保传入 Agent 的是该事件下 Top 1 市场的赔率
-        odds_info = market_data['odds']
-        
         if is_cn:
             market_context = f"""
             ✅ **[真实资金定价] Polymarket 数据**
             - **问题:** {market_data['title']}
-            - **当前赔率 (Top 3):** {odds_info}
+            - **当前赔率 (Top 3):** {market_data['odds']}
             - **资金量:** {market_data['volume']}
             
             **指令:** 市场赔率是“聪明的钱”打出的共识。如果新闻情绪与赔率不符（例如新闻说‘大概率发生’但赔率只有20%），则存在【预期差交易机会】。
@@ -583,7 +584,7 @@ def get_agent_response(history, market_data):
             market_context = f"""
             ✅ **[MARKET PRICING] Polymarket Data**
             - **Market:** {market_data['title']}
-            - **Top 3 Odds:** {odds_info}
+            - **Top 3 Odds:** {market_data['odds']}
             - **Volume:** {market_data['volume']}
             
             **INSTRUCTION:** Odds represent "Smart Money". If news hype disagrees with odds, identify the **Mispricing**.
@@ -704,7 +705,6 @@ with s_mid:
         st.session_state.search_candidates = []
         
     input_val = st.session_state.get("user_news_text", "")
-    # Use a unique key for the text area to allow programmatic clearing if needed, though we sync state
     user_query = st.text_area("Analyze News", value=input_val, height=70, 
                               placeholder="Paste a headline (e.g., 'Unitree robot on Spring Festival Gala')...", 
                               label_visibility="collapsed",
@@ -728,7 +728,7 @@ with s_mid:
             for idx, m in enumerate(st.session_state.search_candidates):
                 c1, c2 = st.columns([4, 1])
                 with c1:
-                    st.info(f"**{m['title']}**\n\nOdds: {m['odds']} (Vol: {m['vol_str']})")
+                    st.info(f"**{m['title']}**\n\nOdds: {m['odds']} (Vol: {m['volume']})")
                 with c2:
                     if st.button("Analyze", key=f"btn_{idx}", use_container_width=True):
                         st.session_state.current_market = m
@@ -788,8 +788,12 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
                 """
             else:
                 options_html = ""
-                sorted_options = sorted(market['options'], key=lambda x: x['price'], reverse=True)[:5] # Show top 5 options
-                for opt in sorted_options:
+                # Fixed: Sort options correctly
+                try:
+                    sorted_opts = sorted(market.get('options', []), key=lambda x: x.get('price', 0), reverse=True)[:5]
+                except: sorted_opts = []
+                
+                for opt in sorted_opts:
                     bar_width = min(opt['price'], 100)
                     options_html += f"""
                     <div style="margin-bottom:4px;">
@@ -839,7 +843,7 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
         </div>
         """, unsafe_allow_html=True)
 
-    # 2. Chat History
+    # Chat History
     for msg in st.session_state.messages:
         if msg['role'] == 'user':
             with st.chat_message("user"):
@@ -848,7 +852,7 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
             with st.chat_message("assistant"):
                 st.markdown(msg['content'])
 
-    # 3. Chat Input (Follow-up)
+    # Chat Input
     if prompt := st.chat_input("Ask a follow-up question..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.rerun()
