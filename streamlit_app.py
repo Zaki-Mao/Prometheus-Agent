@@ -405,7 +405,7 @@ def fetch_categorized_news_v2():
     return {k: fetch_rss(v, 30) for k, v in feeds.items()}
 
 # --- 🔥 C. Polymarket Fetcher (FILTERED & EXPANDED) ---
-# 统一的Polymarket数据处理逻辑
+# 统一的Polymarket数据处理逻辑 - 解决乱码问题
 def process_polymarket_event(event):
     """处理单个Polymarket事件，返回标准化数据结构"""
     try:
@@ -428,16 +428,21 @@ def process_polymarket_event(event):
         elif vol >= 1000: vol_str = f"${vol/1000:.0f}K"
         else: vol_str = f"${vol:.0f}"
 
-        # 解析赔率（兼容多选项）
+        # 解析赔率（兼容多选项）- 修复 Key Error 问题
         outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
         prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
         
         outcome_data = []
-        for i, out in enumerate(outcomes):
-            if i < len(prices):
-                prob = float(prices[i]) * 100
-                outcome_data.append((out, prob))
+        if outcomes and prices:
+            for i, out in enumerate(outcomes):
+                if i < len(prices):
+                    try:
+                        prob = float(prices[i]) * 100
+                        outcome_data.append((str(out), prob))
+                    except: continue
         
+        if not outcome_data: return None
+
         # 按概率降序
         outcome_data.sort(key=lambda x: x[1], reverse=True)
         top_odds = [f"{o}: {p:.1f}%" for o, p in outcome_data[:3]]
@@ -451,7 +456,8 @@ def process_polymarket_event(event):
             "odds": odds_str,
             "url": f"https://polymarket.com/event/{event.get('slug', '')}"
         }
-    except: return None
+    except Exception as e:
+        return None
 
 @st.cache_data(ttl=60)
 def fetch_polymarket_v5_simple(limit=60):
@@ -499,7 +505,7 @@ def search_market_data_list(user_query):
                 api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
                 data = requests.get(api_url, timeout=5).json()
                 if data and isinstance(data, list):
-                    # 使用统一的处理函数
+                    # 使用统一的处理函数，确保解析逻辑一致
                     market_data = process_polymarket_event(data[0])
                     if market_data:
                         candidates.append(market_data)
@@ -867,7 +873,6 @@ if not st.session_state.messages and st.session_state.search_stage == "input":
                                 <div class="market-title-mod">{m['title']}</div>
                                 <div class="market-vol">{m['vol_str']}</div>
                             </div>
-                            <div style="font-size:0.75rem; color:#9ca3af; margin-top:4px;">{m['odds']}</div>
                         </div>
                     </a>
                     """, unsafe_allow_html=True)
