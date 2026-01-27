@@ -292,39 +292,43 @@ st.markdown("""
     }
     .hub-btn:hover .hub-text { color: #ffffff; }
     
-    /* Trend Tag */
+    /* Trend Tags (New Style) */
     .trend-container { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; }
-    .trend-tag {
+    .trend-btn {
         background: rgba(220, 38, 38, 0.15);
         color: #fca5a5;
-        padding: 4px 10px;
-        border-radius: 4px;
+        padding: 6px 12px;
+        border-radius: 6px;
         font-size: 0.8rem;
         text-decoration: none;
         border: 1px solid rgba(220, 38, 38, 0.3);
         transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        gap: 6px;
     }
-    .trend-tag:hover {
-        background: rgba(220, 38, 38, 0.3);
+    .trend-btn:hover {
+        background: rgba(220, 38, 38, 0.4);
         color: #ffffff;
-        transform: scale(1.05);
+        border-color: #ef4444;
+        transform: scale(1.02);
     }
-    .trend-vol { margin-left: 6px; opacity: 0.7; font-size: 0.7rem; }
 </style>
 """, unsafe_allow_html=True)
 
 # ================= 🧠 5. LOGIC CORE =================
 
-# --- 🔥 A. Crypto Prices (Extended List) ---
+# --- 🔥 A. Crypto Prices (Extended List 20+) ---
 @st.cache_data(ttl=60)
 def fetch_crypto_prices():
-    """获取更多主流加密货币实时价格"""
-    # 扩充列表到 20 个，以填满左侧高度
+    """获取更多主流加密货币实时价格，填满左侧列表"""
+    # 扩充监控列表
     symbols = [
         "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", 
         "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "TRXUSDT", "DOTUSDT", 
         "LINKUSDT", "MATICUSDT", "LTCUSDT", "SHIBUSDT", "BCHUSDT", 
-        "ATOMUSDT", "UNIUSDT", "XLMUSDT", "ETCUSDT", "FILUSDT"
+        "ATOMUSDT", "UNIUSDT", "XLMUSDT", "ETCUSDT", "FILUSDT",
+        "NEARUSDT", "APTUSDT", "ARBUSDT", "OPUSDT" 
     ]
     crypto_data = []
     
@@ -361,7 +365,7 @@ def fetch_crypto_prices():
     except:
         pass 
 
-    # Robust Fallback if API fails
+    # Fallback
     if not crypto_data:
         crypto_data = [
             {"symbol": "BTC", "price": "$94,250", "change": 2.3, "volume": "25.5B", "trend": "up"},
@@ -370,7 +374,7 @@ def fetch_crypto_prices():
             {"symbol": "BNB", "price": "$612", "change": 0.8, "volume": "1.2B", "trend": "up"}
         ]
     
-    return crypto_data
+    return crypto_data # Return ALL, no slicing
 
 # --- 🔥 B. Categorized News Fetcher ---
 @st.cache_data(ttl=300)
@@ -414,28 +418,13 @@ def fetch_categorized_news():
         "web3": fetch_rss(feeds["web3"], 20)
     }
 
-# --- C. Real-Time Trends ---
-@st.cache_data(ttl=1800)
-def fetch_real_trends():
-    url = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"
-    trends = []
-    headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        response = requests.get(url, headers=headers, timeout=5)
-        if response.status_code == 200:
-            feed = feedparser.parse(response.content)
-            for entry in feed.entries[:8]:
-                traffic = entry.ht_approx_traffic if hasattr(entry, 'ht_approx_traffic') else "Hot"
-                trends.append({"name": entry.title, "vol": traffic})
-    except: pass
-    if not trends: trends = [{"name": "Market", "vol": "1M+"}, {"name": "Tech", "vol": "500K+"}]
-    return trends
+# --- C. Real-Time Trends (Buttons) ---
+# Removed fetch_real_trends dynamic logic, replaced with static buttons in UI
 
 # --- 🔥 D. Polymarket - 交易量排序 + 比例修正 ---
 @st.cache_data(ttl=60)
 def fetch_top_polymarkets(sort_by="volume", limit=20):
     try:
-        # 获取更多事件以进行过滤
         url = "https://gamma-api.polymarket.com/events?limit=100&closed=false"
         resp = requests.get(url, timeout=5).json()
         markets = []
@@ -447,7 +436,6 @@ def fetch_top_polymarkets(sort_by="volume", limit=20):
                     outcomes = json.loads(m.get('outcomes'))
                     vol = float(m.get('volume', 0))
                     
-                    # 严格筛选：必须有 Yes/No 且交易量 > 0
                     if len(prices) == 2 and "Yes" in outcomes and "No" in outcomes and vol > 0:
                         yes_idx = outcomes.index("Yes")
                         no_idx = outcomes.index("No")
@@ -455,7 +443,7 @@ def fetch_top_polymarkets(sort_by="volume", limit=20):
                         yes_price = float(prices[yes_idx]) * 100
                         no_price = float(prices[no_idx]) * 100
                         
-                        # 数据清洗：确保总和大致为 100%，过滤异常死盘
+                        # Data Cleaning: Filter dead markets
                         if 95 <= (yes_price + no_price) <= 105:
                             markets.append({
                                 "title": event.get('title'),
@@ -467,7 +455,6 @@ def fetch_top_polymarkets(sort_by="volume", limit=20):
                             })
                 except: continue
         
-        # 强制按交易量降序，确保热门事件在顶部
         markets.sort(key=lambda x: x['volume'], reverse=True)
         return markets[:limit]
     except: return []
@@ -521,13 +508,16 @@ if not st.session_state.messages:
         </div>
         """, unsafe_allow_html=True)
 
-        # Global Trends
-        trends = fetch_real_trends()
-        trend_html = '<div class="trend-container">'
-        for t in trends[:6]:
-            safe_q = urllib.parse.quote(t['name'])
-            trend_html += f'<a href="https://www.google.com/search?q={safe_q}" target="_blank" class="trend-tag">{t["name"]} <span class="trend-vol">{t["vol"]}</span></a>'
-        trend_html += '</div>'
+        # 🔥 Global Trends Buttons (Fixed Links)
+        trend_html = """
+        <div class="trend-container">
+            <a href="https://trends.google.com/trending?geo=US" target="_blank" class="trend-btn">📈 Google Trends</a>
+            <a href="https://twitter.com/explore/tabs/trending" target="_blank" class="trend-btn">🐦 Twitter Trends</a>
+            <a href="https://www.jin10.com/" target="_blank" class="trend-btn">⚡ Jin10 Data</a>
+            <a href="https://www.bloomberg.com/trending" target="_blank" class="trend-btn">📊 Bloomberg</a>
+            <a href="https://www.reddit.com/r/all/" target="_blank" class="trend-btn">🤖 Reddit</a>
+        </div>
+        """
         st.markdown(trend_html, unsafe_allow_html=True)
 
         # Category Tabs
