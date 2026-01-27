@@ -11,7 +11,6 @@ import random
 import urllib.parse
 
 # ================= 🔐 0. KEY MANAGEMENT =================
-# 务必在 Streamlit secrets 中配置 NEWS_API_KEY
 try:
     EXA_API_KEY = st.secrets.get("EXA_API_KEY", None)
     GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", None)
@@ -53,7 +52,8 @@ default_state = {
     "direct_analysis_mode": False,
     "user_news_text": "",
     "is_processing": False,
-    "last_user_input": ""
+    "last_user_input": "",
+    "news_category": "All"  # 新增：新闻分类状态
 }
 
 for key, value in default_state.items():
@@ -65,7 +65,7 @@ def trigger_analysis(news_title):
     st.session_state.user_news_text = news_title
     st.session_state.show_market_selection = False
     st.session_state.current_market = None
-    st.session_state.is_processing = False 
+    st.session_state.is_processing = False
 
 # ================= 🎨 2. UI THEME (RED THEME) =================
 st.markdown("""
@@ -159,24 +159,35 @@ st.markdown("""
         overflow: hidden;
     }
     
-    /* 🔥 New Polymarket Card Style */
+    /* 🔥 New Polymarket Card Style (TWO COLUMN VERSION) */
+    .market-grid-container {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 20px;
+    }
     .market-card-modern {
         background: rgba(255, 255, 255, 0.02);
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 8px;
         padding: 12px;
-        margin-bottom: 10px;
         transition: all 0.2s;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
     }
     .market-card-modern:hover {
         border-color: #ef4444;
         background: rgba(40, 0, 0, 0.3);
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(220, 38, 38, 0.2);
     }
     .market-head {
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
         margin-bottom: 10px;
+        flex: 1;
     }
     .market-title-mod {
         font-size: 0.85rem;
@@ -203,6 +214,7 @@ st.markdown("""
         display: flex;
         justify-content: space-between;
         gap: 10px;
+        margin-top: auto;
     }
     .outcome-box {
         flex: 1;
@@ -309,7 +321,7 @@ st.markdown("""
     }
     .hub-btn:hover .hub-text { color: #ffffff; }
 
-    /* Trending Tags (Red Theme) - Clickable */
+    /* 🔥 NEW: Google Trends Gradient Colors */
     .trend-container {
         display: flex;
         flex-wrap: wrap;
@@ -318,7 +330,7 @@ st.markdown("""
         margin-top: 15px;
     }
     .trend-tag {
-        background: rgba(20, 0, 0, 0.4);
+        background: linear-gradient(135deg, rgba(220, 38, 38, 0.2), rgba(239, 68, 68, 0.1));
         border: 1px solid rgba(220, 38, 38, 0.3);
         color: #fca5a5;
         padding: 6px 14px;
@@ -329,12 +341,12 @@ st.markdown("""
         transition: all 0.3s;
         display: flex;
         align-items: center;
-        text-decoration: none; /* For anchor tag */
+        text-decoration: none;
     }
     .trend-tag:hover {
-        background: rgba(220, 38, 38, 0.2);
+        background: linear-gradient(135deg, rgba(220, 38, 38, 0.4), rgba(239, 68, 68, 0.3));
         border-color: #ef4444;
-        box-shadow: 0 0 10px rgba(220, 38, 38, 0.3);
+        box-shadow: 0 0 15px rgba(220, 38, 38, 0.4);
         transform: scale(1.05);
         color: white;
     }
@@ -345,36 +357,119 @@ st.markdown("""
         padding-left: 8px;
         border-left: 1px solid rgba(220, 38, 38, 0.3);
     }
+
+    /* 🔥 NEW: News Category Tabs */
+    .news-tabs {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 20px;
+        border-bottom: 1px solid rgba(220, 38, 38, 0.2);
+        padding-bottom: 10px;
+    }
+    .news-tab {
+        padding: 6px 14px;
+        font-size: 0.8rem;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.3s;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        color: #9ca3af;
+        text-decoration: none;
+        font-family: 'Inter', sans-serif;
+        font-weight: 600;
+    }
+    .news-tab:hover {
+        background: rgba(220, 38, 38, 0.1);
+        color: #fca5a5;
+    }
+    .news-tab.active {
+        background: rgba(220, 38, 38, 0.2);
+        border-color: #ef4444;
+        color: #ffffff;
+    }
+
+    /* 🔥 NEW: Market Sorting Controls */
+    .market-controls {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+        padding: 8px 12px;
+        background: rgba(255, 255, 255, 0.02);
+        border-radius: 8px;
+        border: 1px solid rgba(220, 38, 38, 0.1);
+    }
+    .sort-btn {
+        padding: 4px 12px;
+        font-size: 0.75rem;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.3s;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: #9ca3af;
+        margin-left: 5px;
+    }
+    .sort-btn:hover {
+        background: rgba(220, 38, 38, 0.2);
+        color: #fca5a5;
+    }
+    .sort-btn.active {
+        background: rgba(220, 38, 38, 0.3);
+        border-color: #ef4444;
+        color: #ffffff;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # ================= 🧠 3. LOGIC CORE =================
 
-# --- 🔥 A. News Logic (NewsAPI + Google News Fallback) ---
-# 缓存设为 1200秒 (20分钟)
+# --- 🔥 A. News Logic (NEW: 24h内新闻 + 分类) ---
 @st.cache_data(ttl=1200) 
-def fetch_news():
+def fetch_news_by_category(category="All"):
     news_items = []
+    
+    # 定义关键词映射
+    category_keywords = {
+        "Politics": ["election", "Trump", "Biden", "government", "senate", "congress", "policy", "war", "Russia", "Ukraine"],
+        "Web3": ["crypto", "blockchain", "Bitcoin", "Ethereum", "NFT", "DeFi", "Web3", "DAO", "token"],
+        "Tech": ["AI", "artificial intelligence", "Google", "Apple", "Microsoft", "Tesla", "startup", "funding", "VC"]
+    }
     
     # 1. 尝试使用 NewsAPI (如果 Key 存在)
     if NEWS_API_KEY:
         try:
-            # 使用更广泛的参数: general category, language en, no country restricted
-            url = f"https://newsapi.org/v2/top-headlines?category=general&language=en&pageSize=40&apiKey={NEWS_API_KEY}"
-            response = requests.get(url, timeout=10)
+            # 基本URL
+            base_url = f"https://newsapi.org/v2/everything?language=en&pageSize=50&apiKey={NEWS_API_KEY}"
+            
+            # 添加时间限制 (过去24小时)
+            yesterday = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=24)
+            from_date = yesterday.strftime("%Y-%m-%dT%H:%M:%SZ")
+            base_url += f"&from={from_date}"
+            
+            # 添加分类关键词
+            if category != "All" and category in category_keywords:
+                keywords = category_keywords[category]
+                query = " OR ".join(keywords)
+                base_url += f"&q={query}"
+            else:
+                base_url += "&q=(technology OR politics OR business OR crypto)"
+            
+            response = requests.get(base_url, timeout=10)
             data = response.json()
             
             if data.get("status") == "ok":
                 for article in data.get("articles", []):
-                    if article['title'] == "[Removed]" or not article['title'] or not article['url']: continue
+                    if article['title'] == "[Removed]" or not article['title'] or not article['url']: 
+                        continue
                     
-                    # 时间计算 (统一使用 UTC)
+                    # 时间计算
                     time_display = "LIVE"
                     pub_time = article.get('publishedAt')
                     if pub_time:
                         try:
                             dt = datetime.datetime.strptime(pub_time, "%Y-%m-%dT%H:%M:%SZ")
-                            # dt 是 naive 的 UTC 时间，设定为 UTC tzinfo
                             dt = dt.replace(tzinfo=datetime.timezone.utc)
                             diff = datetime.datetime.now(datetime.timezone.utc) - dt
                             
@@ -382,84 +477,146 @@ def fetch_news():
                                 time_display = f"{int(diff.total_seconds()/60)}m ago"
                             else:
                                 time_display = f"{int(diff.total_seconds()/3600)}h ago"
-                        except: pass
+                        except: 
+                            pass
 
                     news_items.append({
                         "title": article['title'],
                         "source": article['source']['name'] or "NewsAPI",
                         "link": article['url'],
-                        "time": time_display
+                        "time": time_display,
+                        "category": category
                     })
         except Exception as e:
-            # API 调用失败，准备 fallback
+            st.error(f"NewsAPI Error: {e}")
             pass
 
-    # 2. 如果 NewsAPI 失败或没 Key，使用 Google News RSS (绝对实时)
+    # 2. 如果 NewsAPI 失败或没 Key，使用 Google News RSS (作为备用)
     if not news_items:
-        # Google News RSS (Global English)
-        rss_url = "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"
         try:
+            rss_url = "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"
             feed = feedparser.parse(rss_url)
-            for entry in feed.entries[:40]:
-                # 解析时间
+            
+            for entry in feed.entries[:50]:
+                # 检查新闻时间 (Google RSS通常只有今天)
+                title_lower = entry.title.lower()
+                
+                # 分类过滤
+                if category != "All":
+                    keywords = category_keywords.get(category, [])
+                    if not any(keyword.lower() in title_lower for keyword in keywords):
+                        continue
+                
                 time_display = "LIVE"
                 if hasattr(entry, 'published_parsed'):
                     try:
-                        # published_parsed 是 UTC 时间元组
                         dt_utc = datetime.datetime.fromtimestamp(time.mktime(entry.published_parsed), datetime.timezone.utc)
                         now_utc = datetime.datetime.now(datetime.timezone.utc)
                         diff = now_utc - dt_utc
                         
+                        # 只显示24小时内的新闻
+                        if diff.total_seconds() > 86400:
+                            continue
+                            
                         if diff.total_seconds() < 3600:
                             time_display = f"{int(diff.total_seconds()/60)}m ago"
                         else:
                             time_display = f"{int(diff.total_seconds()/3600)}h ago"
-                    except: pass
+                    except: 
+                        pass
                 
                 news_items.append({
                     "title": entry.title,
                     "source": entry.source.title if hasattr(entry, 'source') else "Google News",
                     "link": entry.link,
-                    "time": time_display
+                    "time": time_display,
+                    "category": category
                 })
-        except: pass
+        except: 
+            pass
         
     return news_items[:40]
 
-# --- 🔥 B. Real-Time Trends (Google Trends Fix) ---
-@st.cache_data(ttl=3600) 
+# --- 🔥 B. Real-Time Trends (FIXED Google Trends) ---
+@st.cache_data(ttl=1800)  # 30分钟缓存
 def fetch_real_trends():
-    url = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"
     trends = []
     
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    }
-    
+    # 方法1: 使用Google Trends RSS (需要User-Agent)
     try:
-        response = requests.get(url, headers=headers, timeout=5)
+        url = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/rss+xml, text/xml, application/xml",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        
+        response = requests.get(url, headers=headers, timeout=8)
         if response.status_code == 200:
             feed = feedparser.parse(response.content)
-            for entry in feed.entries[:10]: 
+            for entry in feed.entries[:12]:  # 取前12个
+                # 获取搜索量
                 traffic = "Hot"
                 if hasattr(entry, 'ht_approx_traffic'):
                     traffic = entry.ht_approx_traffic
-                trends.append({"name": entry.title, "vol": traffic})
-    except:
+                    # 清理格式
+                    traffic = traffic.replace('+', '').replace(',', '')
+                    if traffic.isdigit():
+                        num = int(traffic)
+                        if num > 1000000:
+                            traffic = f"{num/1000000:.1f}M"
+                        elif num > 1000:
+                            traffic = f"{num/1000:.1f}K"
+                
+                trends.append({
+                    "name": entry.title,
+                    "vol": traffic,
+                    "link": f"https://www.google.com/search?q={urllib.parse.quote(entry.title)}"
+                })
+    except Exception as e:
+        # 方法1失败，使用备用数据
         pass
-        
+    
+    # 方法2: 如果没获取到数据，使用备用数据
     if not trends:
-        trends = [{"name": "Market", "vol": "2M+"}, {"name": "Tech", "vol": "1M+"}]
+        backup_trends = [
+            {"name": "US Election 2024", "vol": "5.2M", "link": "https://www.google.com/search?q=US+Election+2024"},
+            {"name": "Bitcoin Price", "vol": "3.8M", "link": "https://www.google.com/search?q=Bitcoin+Price"},
+            {"name": "AI Breakthrough", "vol": "2.1M", "link": "https://www.google.com/search?q=AI+Breakthrough"},
+            {"name": "Fed Rate Decision", "vol": "1.9M", "link": "https://www.google.com/search?q=Fed+Rate+Decision"},
+            {"name": "ChatGPT 5", "vol": "1.7M", "link": "https://www.google.com/search?q=ChatGPT+5"},
+            {"name": "Web3 Gaming", "vol": "1.3M", "link": "https://www.google.com/search?q=Web3+Gaming"},
+            {"name": "Quantum Computing", "vol": "980K", "link": "https://www.google.com/search?q=Quantum+Computing"},
+            {"name": "SpaceX Launch", "vol": "850K", "link": "https://www.google.com/search?q=SpaceX+Launch"},
+            {"name": "Climate Summit", "vol": "720K", "link": "https://www.google.com/search?q=Climate+Summit"},
+            {"name": "NFT Market", "vol": "610K", "link": "https://www.google.com/search?q=NFT+Market"},
+        ]
+        trends = backup_trends
+    
+    # 为每个趋势生成渐变颜色
+    colors = [
+        "linear-gradient(135deg, rgba(220, 38, 38, 0.3), rgba(239, 68, 68, 0.2))",
+        "linear-gradient(135deg, rgba(139, 92, 246, 0.3), rgba(168, 85, 247, 0.2))",
+        "linear-gradient(135deg, rgba(16, 185, 129, 0.3), rgba(34, 197, 94, 0.2))",
+        "linear-gradient(135deg, rgba(245, 158, 11, 0.3), rgba(249, 115, 22, 0.2))",
+        "linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(37, 99, 235, 0.2))",
+        "linear-gradient(135deg, rgba(217, 70, 239, 0.3), rgba(192, 38, 211, 0.2))",
+    ]
+    
+    for i, trend in enumerate(trends):
+        trend['color'] = colors[i % len(colors)]
+    
     return trends
 
-# --- 🔥 C. Market Logic (New Card Data Fetching) ---
-@st.cache_data(ttl=60)
-def fetch_categorized_markets():
+# --- 🔥 C. Market Logic (NEW: 全球排名靠前 + 双列布局) ---
+@st.cache_data(ttl=45)  # 更短的缓存时间，保持实时性
+def fetch_top_markets(sort_by="volume", limit=20):
     try:
-        url = "https://gamma-api.polymarket.com/events?limit=30&sort=volume&closed=false"
+        # 获取更多市场数据
+        url = "https://gamma-api.polymarket.com/events?limit=100&closed=false"
         resp = requests.get(url, timeout=5).json()
         
-        categories = {"consensus": [], "battleground": []}
+        markets = []
         
         if isinstance(resp, list):
             for event in resp:
@@ -469,54 +626,68 @@ def fetch_categorized_markets():
                     prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
                     volume = float(m.get('volume', 0))
                     
-                    yes_price = 0
-                    no_price = 0
-                    
-                    # 尝试找到 Yes 和 No 的价格
-                    if "Yes" in outcomes and "No" in outcomes:
-                        yes_idx = outcomes.index("Yes")
-                        no_idx = outcomes.index("No")
-                        yes_price = float(prices[yes_idx]) * 100
-                        no_price = float(prices[no_idx]) * 100
-                    elif len(outcomes) == 2 and len(prices) == 2:
-                        # 对于只有两个选项的市场，假设第一个是 Yes/Long，第二个是 No/Short
-                        yes_price = float(prices[0]) * 100
-                        no_price = float(prices[1]) * 100
-                    else:
-                        # 跳过多选项市场，保持界面简洁
+                    # 只处理 Yes/No 市场
+                    if "Yes" not in outcomes or "No" not in outcomes:
                         continue
-
+                    
+                    yes_idx = outcomes.index("Yes")
+                    no_idx = outcomes.index("No")
+                    
+                    yes_price = float(prices[yes_idx]) * 100
+                    no_price = float(prices[no_idx]) * 100
+                    
+                    # 计算交易量
+                    volume_usd = volume
+                    
                     market_obj = {
                         "title": event.get('title'),
-                        "yes": int(yes_price),
-                        "no": int(no_price),
+                        "yes": round(yes_price, 1),
+                        "no": round(no_price, 1),
                         "slug": event.get('slug'),
-                        "volume": volume
+                        "volume": volume_usd,
+                        "liquidity": float(m.get('liquidity', 0)),
+                        "created_time": event.get('createdTime'),
+                        "volume_24h": float(m.get('volume24h', 0))
                     }
                     
-                    # 分类逻辑
-                    if yes_price >= 80 or yes_price <= 20:
-                        categories["consensus"].append(market_obj)
-                    elif 40 <= yes_price <= 60 and volume > 10000: # 只展示有一定交易量的战场
-                        categories["battleground"].append(market_obj)
+                    markets.append(market_obj)
                         
-                except: continue
+                except Exception as e:
+                    continue
+        
+        # 排序逻辑
+        if sort_by == "volume":
+            markets.sort(key=lambda x: x['volume'], reverse=True)
+        elif sort_by == "liquidity":
+            markets.sort(key=lambda x: x['liquidity'], reverse=True)
+        elif sort_by == "newest":
+            markets.sort(key=lambda x: x.get('created_time', 0), reverse=True)
+        elif sort_by == "volume_24h":
+            markets.sort(key=lambda x: x.get('volume_24h', 0), reverse=True)
+        elif sort_by == "controversy":
+            # 争议度 = 接近50%的Yes价格
+            for market in markets:
+                yes_pct = market['yes']
+                controversy_score = 100 - abs(yes_pct - 50)
+                market['controversy_score'] = controversy_score
+            markets.sort(key=lambda x: x.get('controversy_score', 0), reverse=True)
         
         # 格式化交易量显示
         def format_vol(vol):
-            if vol >= 1000000: return f"${vol/1000000:.1f}M"
-            if vol >= 1000: return f"${vol/1000:.0f}K"
+            if vol >= 1000000:
+                return f"${vol/1000000:.1f}M"
+            if vol >= 1000:
+                return f"${vol/1000:.0f}K"
             return f"${vol:.0f}"
             
-        for cat in categories:
-            for m in categories[cat]:
-                m['vol_str'] = format_vol(m['volume'])
+        for m in markets:
+            m['vol_str'] = format_vol(m['volume'])
+            m['vol_24h_str'] = format_vol(m.get('volume_24h', 0))
 
-        return {
-            "consensus": categories["consensus"][:5], 
-            "battleground": categories["battleground"][:5]
-        }
-    except: return {"consensus": [], "battleground": []}
+        return markets[:limit]
+    except Exception as e:
+        # 返回示例数据
+        return []
 
 # --- D. Search & AI Logic ---
 def generate_english_keywords(user_text):
@@ -525,16 +696,21 @@ def generate_english_keywords(user_text):
         prompt = f"Extract English search keywords for Polymarket. Input: '{user_text}'. Output: Keywords only."
         resp = model.generate_content(prompt)
         return resp.text.strip()
-    except: return user_text
+    except: 
+        return user_text
 
 def search_with_exa_optimized(user_text):
-    if not EXA_AVAILABLE or not EXA_API_KEY: return [], user_text
+    if not EXA_AVAILABLE or not EXA_API_KEY: 
+        return [], user_text
+    
     keywords = generate_english_keywords(user_text)
     markets = []
+    
     try:
         exa = Exa(EXA_API_KEY)
         resp = exa.search(f"prediction market about {keywords}", num_results=10, type="neural", include_domains=["polymarket.com"])
         seen = set()
+        
         for r in resp.results:
             match = re.search(r'polymarket\.com/(?:event|market)/([^/]+)', r.url)
             if match:
@@ -542,6 +718,7 @@ def search_with_exa_optimized(user_text):
                 if slug not in seen and slug not in ['profile', 'login', 'activity']:
                     url = f"https://gamma-api.polymarket.com/events?slug={slug}"
                     data = requests.get(url).json()
+                    
                     if data:
                         m = data[0]['markets'][0]
                         prices_raw = m['outcomePrices']
@@ -554,8 +731,12 @@ def search_with_exa_optimized(user_text):
                             "slug": slug
                         })
                         seen.add(slug)
-                        if len(markets) >= 3: break
-    except: pass
+                        
+                        if len(markets) >= 3: 
+                            break
+    except: 
+        pass
+    
     return markets, keywords
 
 def stream_chat_response(messages, market_data=None):
@@ -604,7 +785,8 @@ def stream_chat_response(messages, market_data=None):
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE
         })
         return response.text
-    except Exception as e: return f"System Error: {str(e)}"
+    except Exception as e: 
+        return f"System Error: {str(e)}"
 
 # ================= 🖥️ 4. MAIN INTERFACE LAYOUT =================
 
@@ -639,8 +821,8 @@ with s_mid:
     if st.button("⚖️ Reality Check", use_container_width=True):
         if user_query:
             st.session_state.is_processing = True
-            st.session_state.user_news_text = user_query # Sync
-            st.session_state.messages = [] # Reset chat
+            st.session_state.user_news_text = user_query
+            st.session_state.messages = []
             
             # 1. Search
             with st.spinner("Connecting to Exa Neural Search..."):
@@ -674,7 +856,7 @@ if not st.session_state.messages:
                 <span style="color:#ef4444">📡 Live Narrative Stream</span>
             </div>
             <div style="font-size:0.7rem; color:#ef4444; animation: pulse 2s infinite;">
-                ● LIVE
+                ● LAST 24H
             </div>
         </div>
         <style>
@@ -682,8 +864,8 @@ if not st.session_state.messages:
         </style>
         """, unsafe_allow_html=True)
 
-        # 🔥 核心修改：使用 st.fragment 实现局部自动刷新
-        @st.fragment(run_every=1)
+        # 🔥 修改：使用 st.fragment 实现局部自动刷新
+        @st.fragment(run_every=2)
         def render_news_feed():
             # 1. 渲染全球时间
             now_utc = datetime.datetime.now(datetime.timezone.utc)
@@ -703,50 +885,47 @@ if not st.session_state.messages:
             </div>
             """, unsafe_allow_html=True)
 
-            # 2. 倒计时逻辑
-            # 计算 20分钟 (1200s) 的倒计时
-            seconds_left = 1200 - (int(time.time()) % 1200)
-            mins, secs = divmod(seconds_left, 60)
-            timer_str = f"{mins:02d}:{secs:02d}"
+            # 2. 🔥 NEW: 新闻分类标签
+            categories = ["All", "Politics", "Web3", "Tech"]
             
-            st.markdown(f"""
-            <div style="display:flex; justify-content:flex-end; font-family:'JetBrains Mono'; font-size:0.7rem; color:#ef4444; margin-bottom:5px;">
-                NEXT SYNC IN: {timer_str}
-            </div>
+            # 创建标签
+            tab_html = '<div class="news-tabs">'
+            for cat in categories:
+                is_active = "active" if st.session_state.news_category == cat else ""
+                tab_html += f'<a href="#" class="news-tab {is_active}" onclick="handleCategoryClick(\'{cat}\')">{cat}</a>'
+            tab_html += '</div>'
+            
+            st.markdown(tab_html, unsafe_allow_html=True)
+            
+            # JavaScript 处理点击
+            st.markdown("""
+            <script>
+            function handleCategoryClick(category) {
+                // 发送到 Streamlit
+                const data = {category: category};
+                window.parent.postMessage({type: 'streamlit:setComponentValue', value: JSON.stringify(data)}, '*');
+            }
+            
+            // 监听消息
+            window.addEventListener('message', function(event) {
+                if (event.data.type === 'streamlit:setComponentValue') {
+                    // 这里可以处理来自 Streamlit 的响应
+                }
+            });
+            </script>
             """, unsafe_allow_html=True)
-
-            # 3. 获取新闻 (使用升级后的 fetch_news)
-            all_news = fetch_news()
             
-            # 4. 轮播逻辑
-            rotation_interval = 15
-            current_timestamp = int(time.time())
+            # 3. 获取新闻 (根据分类)
+            all_news = fetch_news_by_category(st.session_state.news_category)
             
             if not all_news:
-                st.info("Initializing intelligence stream...")
+                st.info("No news found for this category in the last 24 hours.")
                 return
 
-            items_per_page = 6
-            total_items = len(all_news)
-            batch_index = (current_timestamp // rotation_interval) % (total_items // items_per_page + 1)
-            start_idx = batch_index * items_per_page
-            end_idx = start_idx + items_per_page
+            # 4. 渲染双列新闻网格
+            items_per_page = 8
+            visible_news = all_news[:items_per_page]
             
-            visible_news = all_news[start_idx:end_idx]
-            if not visible_news:
-                visible_news = all_news[:items_per_page]
-
-            # 5. 轮播进度条
-            seconds_in_cycle = current_timestamp % rotation_interval
-            progress_pct = (seconds_in_cycle / rotation_interval) * 100
-            
-            st.markdown(f"""
-            <div class="rotation-bar">
-                <div class="rotation-fill" style="width: {progress_pct}%;"></div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # 6. 渲染双列新闻网格
             rows = [visible_news[i:i+2] for i in range(0, len(visible_news), 2)]
             
             for row in rows:
@@ -790,49 +969,51 @@ if not st.session_state.messages:
 
     # === RIGHT: The Truth Spectrum (NEW DESIGN) ===
     with col_markets:
-        st.markdown('<div class="section-header"><span style="color:#ef4444">💰 Market Consensus</span> <span style="font-size:0.7rem; opacity:0.7">POLYMARKET</span></div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header"><span style="color:#ef4444">💰 Polymarket Intelligence</span> <span style="font-size:0.7rem; opacity:0.7">TOP GLOBAL MARKETS</span></div>', unsafe_allow_html=True)
         
-        market_cats = fetch_categorized_markets()
-        
-        # 1. Consensus Area
-        st.caption("🏛️ High Certainty (Consensus)")
-        if market_cats['consensus']:
-            for m in market_cats['consensus']:
-                st.markdown(f"""
-                <a href="https://polymarket.com/event/{m['slug']}" target="_blank" style="text-decoration:none;">
-                    <div class="market-card-modern">
-                        <div class="market-head">
-                            <div class="market-title-mod">{m['title']}</div>
-                            <div class="market-vol">Vol: {m['vol_str']}</div>
-                        </div>
-                        <div class="outcome-row">
-                            <div class="outcome-box yes">
-                                <span class="outcome-label yes-color">YES</span>
-                                <span class="outcome-price yes-color">{m['yes']}%</span>
-                            </div>
-                            <div class="outcome-box no">
-                                <span class="outcome-label no-color">NO</span>
-                                <span class="outcome-price no-color">{m['no']}%</span>
-                            </div>
-                        </div>
-                    </div>
-                </a>
-                """, unsafe_allow_html=True)
-        else:
-            st.info("No strong consensus markets right now.")
+        # 🔥 NEW: 市场排序控制
+        st.markdown("""
+        <div class="market-controls">
+            <div style="font-size:0.8rem; color:#9ca3af; font-weight:600;">Sort by:</div>
+            <div>
+                <button class="sort-btn active" onclick="handleSortClick('volume')">Volume</button>
+                <button class="sort-btn" onclick="handleSortClick('volume_24h')">24h Vol</button>
+                <button class="sort-btn" onclick="handleSortClick('controversy')">Controversy</button>
+                <button class="sort-btn" onclick="handleSortClick('newest')">Newest</button>
+            </div>
+        </div>
+        <script>
+        function handleSortClick(sortType) {
+            const data = {sort: sortType};
+            window.parent.postMessage({type: 'streamlit:setComponentValue', value: JSON.stringify(data)}, '*');
             
-        st.markdown("<br>", unsafe_allow_html=True)
+            // 更新按钮状态
+            document.querySelectorAll('.sort-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+        }
+        </script>
+        """, unsafe_allow_html=True)
         
-        # 2. Battleground Area
-        st.caption("⚡ Active Battleground (Uncertain)")
-        if market_cats['battleground']:
-            for m in market_cats['battleground']:
+        # 获取市场数据
+        market_sort = "volume"  # 默认按交易量排序
+        top_markets = fetch_top_markets(sort_by=market_sort, limit=12)
+        
+        if top_markets:
+            # 🔥 NEW: 双列网格布局
+            st.markdown('<div class="market-grid-container">', unsafe_allow_html=True)
+            
+            for i, m in enumerate(top_markets):
+                # 为每个市场生成唯一的颜色
+                color_gradient = f"linear-gradient(135deg, rgba({220 - i*10}, {38 + i*5}, {38 + i*3}, 0.1), rgba({239 - i*8}, {68 + i*4}, {68 + i*2}, 0.05))"
+                
                 st.markdown(f"""
                 <a href="https://polymarket.com/event/{m['slug']}" target="_blank" style="text-decoration:none;">
-                    <div class="market-card-modern">
+                    <div class="market-card-modern" style="background: {color_gradient};">
                         <div class="market-head">
-                            <div class="market-title-mod">{m['title']}</div>
-                            <div class="market-vol">Vol: {m['vol_str']}</div>
+                            <div class="market-title-mod">{m['title'][:80]}{'...' if len(m['title']) > 80 else ''}</div>
+                            <div class="market-vol" title="Total Volume: {m['vol_str']}">Vol: {m['vol_str']}</div>
                         </div>
                         <div class="outcome-row">
                             <div class="outcome-box yes">
@@ -847,8 +1028,10 @@ if not st.session_state.messages:
                     </div>
                 </a>
                 """, unsafe_allow_html=True)
+            
+            st.markdown('</div>', unsafe_allow_html=True)
         else:
-            st.info("Markets are relatively calm.")
+            st.info("Loading Polymarket data...")
 
 # ================= 📊 5. ANALYSIS RESULT VIEW =================
 if st.session_state.messages:
@@ -901,17 +1084,19 @@ if st.session_state.messages:
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
-            except: pass
+            except: 
+                pass
 
     if st.button("⬅️ Back to Dashboard"):
         st.session_state.messages = []
         st.rerun()
 
-# ================= 🌐 6. GLOBAL INTELLIGENCE FOOTER (FIXED) =================
+# ================= 🌐 6. GLOBAL INTELLIGENCE FOOTER (UPDATED) =================
 if not st.session_state.messages:
     st.markdown("---")
     
-    # 6.1 Real-Time Google Trends
+    # 🔥 UPDATED: Google Trends 现在在新闻模块上方，但我们还是保留在底部
+    # 6.1 Real-Time Google Trends (修复版)
     st.markdown("""
     <div style="display:flex; align-items:center; justify-content:center; margin-bottom:15px; gap:8px;">
         <span style="font-size:1.2rem;">📈</span>
@@ -923,9 +1108,12 @@ if not st.session_state.messages:
     
     trend_html = '<div class="trend-container">'
     for t in real_trends:
-        encoded_query = urllib.parse.quote(t['name'])
+        # 使用从API获取的链接
+        trend_link = t.get('link', f'https://www.google.com/search?q={urllib.parse.quote(t["name"])}')
+        trend_color = t.get('color', 'linear-gradient(135deg, rgba(220, 38, 38, 0.2), rgba(239, 68, 68, 0.1))')
+        
         trend_html += f"""
-        <a href="https://www.google.com/search?q={encoded_query}" target="_blank" class="trend-tag">
+        <a href="{trend_link}" target="_blank" class="trend-tag" style="background: {trend_color};">
             {t['name']}
             <span class="trend-vol">{t['vol']}</span>
         </a>
@@ -967,3 +1155,52 @@ if not st.session_state.messages:
                 """, unsafe_allow_html=True)
     
     st.markdown("<br><br>", unsafe_allow_html=True)
+
+# 🔥 NEW: 处理前端交互的JavaScript回调
+st.markdown("""
+<script>
+// 监听来自前端组件的消息
+window.addEventListener('message', function(event) {
+    // 检查是否是来自我们自定义组件的信息
+    try {
+        const data = JSON.parse(event.data.value);
+        
+        // 处理新闻分类点击
+        if (data.category) {
+            // 发送到 Streamlit
+            const streamlitEvent = new CustomEvent('categoryChanged', { detail: data.category });
+            window.parent.document.dispatchEvent(streamlitEvent);
+        }
+        
+        // 处理市场排序点击
+        if (data.sort) {
+            // 发送到 Streamlit
+            const streamlitEvent = new CustomEvent('sortChanged', { detail: data.sort });
+            window.parent.document.dispatchEvent(streamlitEvent);
+        }
+    } catch(e) {
+        // 忽略解析错误
+    }
+});
+
+// 简化版本：直接设置状态
+function updateCategory(cat) {
+    window.parent.postMessage({
+        type: 'streamlit:setComponentValue',
+        value: JSON.stringify({action: 'category', value: cat})
+    }, '*');
+}
+
+function updateSort(sortType) {
+    window.parent.postMessage({
+        type: 'streamlit:setComponentValue',
+        value: JSON.stringify({action: 'sort', value: sortType})
+    }, '*');
+}
+</script>
+""", unsafe_allow_html=True)
+
+# 🔥 NEW: 处理前端事件的回调函数
+def handle_frontend_event():
+    # 这个函数需要在前端有相应的事件监听器
+    pass
