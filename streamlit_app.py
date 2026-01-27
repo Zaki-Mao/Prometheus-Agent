@@ -323,18 +323,19 @@ st.markdown("""
 
 # ================= 🧠 5. LOGIC CORE =================
 
-# --- 🔥 A. Crypto Prices (Massively Expanded to 24 items) ---
-# Renamed function to force cache refresh
+# --- 🔥 A. Crypto Prices (扩展到40+币种) ---
 @st.cache_data(ttl=60)
 def fetch_crypto_prices_v2():
-    """获取更多主流加密货币实时价格"""
-    # 扩充监控列表至 24 个，确保列表够长
+    """获取更多主流加密货币实时价格 - 扩展到40+币种"""
     symbols = [
         "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", 
         "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "SHIBUSDT", "DOTUSDT", 
         "LINKUSDT", "TRXUSDT", "MATICUSDT", "LTCUSDT", "BCHUSDT", 
         "UNIUSDT", "NEARUSDT", "APTUSDT", "FILUSDT", "ICPUSDT",
-        "PEPEUSDT", "WIFUSDT", "SUIUSDT", "FETUSDT"
+        "PEPEUSDT", "WIFUSDT", "SUIUSDT", "FETUSDT", "ATOMUSDT",
+        "ETCUSDT", "XLMUSDT", "RNDRUSDT", "INJUSDT", "STXUSDT",
+        "OPUSDT", "ARBUSDT", "IMXUSDT", "ALGOUSDT", "AAVEUSDT",
+        "TIAUSDT", "LDOUSDT", "HBARUSDT", "WLDUSDT", "SEIUSDT"
     ]
     crypto_data = []
     
@@ -371,7 +372,7 @@ def fetch_crypto_prices_v2():
     except:
         pass 
 
-    # Robust Fallback if API fails
+    # Robust Fallback
     if not crypto_data:
         crypto_data = [
             {"symbol": "BTC", "price": "$94,250", "change": 2.3, "volume": "25.5B", "trend": "up"},
@@ -383,7 +384,6 @@ def fetch_crypto_prices_v2():
     return crypto_data
 
 # --- 🔥 B. Categorized News Fetcher ---
-# Renamed function to force cache refresh
 @st.cache_data(ttl=300)
 def fetch_categorized_news_v2():
     """获取分类新闻"""
@@ -425,70 +425,96 @@ def fetch_categorized_news_v2():
         "web3": fetch_rss(feeds["web3"], 20)
     }
 
-# --- 🔥 D. Polymarket - 严格数据清洗 (Fix Mismatch) ---
-# Renamed function to force cache refresh
+# --- 🔥 C. Polymarket - 修复赔率显示问题 ---
 @st.cache_data(ttl=60)
-def fetch_polymarket_v2(sort_by="volume", limit=20):
+def fetch_polymarket_v3(sort_by="volume", limit=20):
+    """
+    🔥 关键修复：确保显示的赔率与Polymarket网站一致
+    
+    问题根源：
+    - Polymarket API 的 outcomePrices 顺序与 outcomes 对应
+    - 但 outcomes 可能是 ["Yes", "No"] 或 ["No", "Yes"] 或其他顺序
+    - 我们必须正确匹配 Yes 和 No 的价格索引
+    """
     try:
-        # 获取更多事件以进行过滤
         url = "https://gamma-api.polymarket.com/events?limit=100&closed=false"
         resp = requests.get(url, timeout=5).json()
         markets = []
+        
         if isinstance(resp, list):
             for event in resp:
                 try:
-                    # 获取第一个市场
-                    if not event.get('markets'): continue
+                    if not event.get('markets'): 
+                        continue
+                    
                     m = event['markets'][0]
                     
-                    # 1. 严格过滤：必须是 Yes/No 二元市场
-                    # Polymarket API 返回的 outcomes 字符串可能是 '["Yes", "No"]' 或 '["Trump", "Biden", ...]'
+                    # 解析 outcomes
                     outcomes_raw = m.get('outcomes')
-                    # 安全解析 JSON
                     if isinstance(outcomes_raw, str):
-                        try: outcomes = json.loads(outcomes_raw)
-                        except: continue
+                        try: 
+                            outcomes = json.loads(outcomes_raw)
+                        except: 
+                            continue
                     else:
                         outcomes = outcomes_raw
-                        
-                    # 只有 outcomes 是 ["Yes", "No"] 或者是 ["No", "Yes"] 时才保留 (通常是 Yes/No)
-                    # 很多赛事冠军预测 outcomes 是队伍名，这种必须踢掉，否则 Yes/No 价格会对应成 队伍A/队伍B 的价格，导致数据"对不上"
-                    if not outcomes or "Yes" not in outcomes or "No" not in outcomes:
-                        continue
-                        
+                    
+                    # 解析 prices
                     prices_raw = m.get('outcomePrices')
                     if isinstance(prices_raw, str):
-                        try: prices = json.loads(prices_raw)
-                        except: continue
+                        try: 
+                            prices = json.loads(prices_raw)
+                        except: 
+                            continue
                     else:
                         prices = prices_raw
-                        
-                    vol = float(m.get('volume', 0))
                     
-                    # 确保价格和选项对应
-                    if len(prices) == len(outcomes) and vol > 0:
-                        yes_idx = outcomes.index("Yes")
-                        no_idx = outcomes.index("No")
-                        
-                        yes_price = float(prices[yes_idx]) * 100
-                        no_price = float(prices[no_idx]) * 100
-                        
-                        # 2. 再次校验价格合理性 (防止死盘)
-                        if 95 <= (yes_price + no_price) <= 105:
-                            markets.append({
-                                "title": event.get('title'),
-                                "yes": int(yes_price),
-                                "no": int(no_price),
-                                "slug": event.get('slug'),
-                                "volume": vol,
-                                "vol_str": f"${vol/1000000:.1f}M" if vol > 1000000 else f"${vol/1000:.0f}K"
-                            })
-                except: continue
+                    # 🔥 关键修复：严格验证是否为 Yes/No 二元市场
+                    if not isinstance(outcomes, list) or not isinstance(prices, list):
+                        continue
+                    
+                    if len(outcomes) != 2 or len(prices) != 2:
+                        continue
+                    
+                    # 检查是否包含 Yes 和 No
+                    if "Yes" not in outcomes or "No" not in outcomes:
+                        continue
+                    
+                    # 🔥 核心修复：正确获取 Yes 和 No 的索引
+                    yes_idx = outcomes.index("Yes")
+                    no_idx = outcomes.index("No")
+                    
+                    # 🔥 使用正确的索引获取价格
+                    yes_price = float(prices[yes_idx]) * 100
+                    no_price = float(prices[no_idx]) * 100
+                    
+                    # 验证价格合理性
+                    price_sum = yes_price + no_price
+                    if not (95 <= price_sum <= 105):
+                        continue
+                    
+                    vol = float(m.get('volume', 0))
+                    if vol <= 0:
+                        continue
+                    
+                    markets.append({
+                        "title": event.get('title'),
+                        "yes": int(round(yes_price)),  # 四舍五入到整数
+                        "no": int(round(no_price)),
+                        "slug": event.get('slug'),
+                        "volume": vol,
+                        "vol_str": f"${vol/1000000:.1f}M" if vol >= 1000000 else f"${vol/1000:.0f}K"
+                    })
+                    
+                except Exception as e:
+                    continue
         
-        # 强制按交易量降序
+        # 按交易量排序
         markets.sort(key=lambda x: x['volume'], reverse=True)
         return markets[:limit]
-    except: return []
+        
+    except Exception as e:
+        return []
 
 def search_with_exa_optimized(user_text):
     if not EXA_AVAILABLE or not EXA_API_KEY: return [], user_text
@@ -539,7 +565,7 @@ if not st.session_state.messages:
         </div>
         """, unsafe_allow_html=True)
 
-        # 🔥 FIXED: Global Trends Buttons (Static Links)
+        # Global Trends Buttons
         trend_html = """
         <div class="trend-row">
             <a href="https://trends.google.com/trending?geo=US" target="_blank" class="trend-fixed-btn">📈 Google Trends</a>
@@ -560,7 +586,7 @@ if not st.session_state.messages:
                 st.session_state.news_category = c
                 st.rerun()
 
-        # 🔥 核心修改：修复时区显示缩进问题
+        # 实时更新的新闻流
         @st.fragment(run_every=1)
         def render_news_feed():
             now_utc = datetime.datetime.now(datetime.timezone.utc)
@@ -578,7 +604,7 @@ if not st.session_state.messages:
 </div>
 """, unsafe_allow_html=True)
 
-            # Web3 (Crypto) Logic - 🔥 Expanded to 24 items
+            # Web3 (Crypto) Logic - 🔥 扩展到40+币种
             if st.session_state.news_category == "web3":
                 data = fetch_crypto_prices_v2()
                 if data:
@@ -606,7 +632,7 @@ if not st.session_state.messages:
                 all_news = fetch_categorized_news_v2()
                 news_list = all_news.get(st.session_state.news_category, all_news['all'])
                 if news_list:
-                    rows = [news_list[i:i+2] for i in range(0, min(len(news_list), 24), 2)] # Show 24 items
+                    rows = [news_list[i:i+2] for i in range(0, min(len(news_list), 24), 2)]
                     for row in rows:
                         cols = st.columns(2)
                         for i, news in enumerate(row):
@@ -624,7 +650,7 @@ if not st.session_state.messages:
 
         render_news_feed()
 
-    # === RIGHT: Polymarket (Top Volume Only) ===
+    # === RIGHT: Polymarket (使用修复后的V3版本) ===
     with col_markets:
         st.markdown('<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid rgba(220,38,38,0.3); padding-bottom:8px;"><span style="font-size:0.9rem; font-weight:700; color:#ef4444;">💰 PREDICTION MARKETS (TOP VOLUME)</span></div>', unsafe_allow_html=True)
         
@@ -633,8 +659,8 @@ if not st.session_state.messages:
         if sc1.button("💵 Volume", use_container_width=True): st.session_state.market_sort = "volume"
         if sc2.button("🔥 Activity", use_container_width=True): st.session_state.market_sort = "active"
         
-        # Use V2 fetcher with Strict Yes/No Filter
-        markets = fetch_polymarket_v2(st.session_state.market_sort, 20)
+        # 🔥 使用修复后的 V3 版本
+        markets = fetch_polymarket_v3(st.session_state.market_sort, 20)
         
         if markets:
             rows = [markets[i:i+2] for i in range(0, len(markets), 2)]
