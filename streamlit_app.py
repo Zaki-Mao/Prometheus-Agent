@@ -9,6 +9,7 @@ import datetime
 import random
 import urllib.parse
 import html
+import textwrap
 
 # -----------------------------------------------------------------------------
 # 0. DEPENDENCY CHECK
@@ -405,12 +406,11 @@ def fetch_categorized_news_v2():
     }
     return {k: fetch_rss(v, 30) for k, v in feeds.items()}
 
-# --- 🔥 C. Polymarket Fetcher (UNIFIED & ROBUST) ---
+# --- 🔥 C. Polymarket Fetcher (FILTERED & EXPANDED) ---
 def process_polymarket_event(event):
     """
     Core function to process ANY Polymarket event.
-    Handles both 'Binary' (Yes/No) and 'Multiple Choice' markets.
-    Returns None if the market should be filtered out.
+    Returns standardized data structure.
     """
     try:
         title = event.get('title', 'Untitled').strip()
@@ -426,10 +426,11 @@ def process_polymarket_event(event):
         
         # 3. Find Main Market (Highest Volume)
         markets_list = event.get('markets', [])
-        markets_list.sort(key=lambda x: float(x.get('volume', 0)), reverse=True)
+        # Fix: Ensure volume is treated as float for sorting
+        markets_list.sort(key=lambda x: float(x.get('volume', 0) or 0), reverse=True)
         m = markets_list[0]
         
-        vol = float(m.get('volume', 0))
+        vol = float(m.get('volume', 0) or 0)
         if vol < 1000: return None # Filter Dead Markets
         
         if vol >= 1000000: vol_str = f"${vol/1000000:.1f}M"
@@ -462,7 +463,7 @@ def process_polymarket_event(event):
             try:
                 sub_out = json.loads(sub_m.get('outcomes')) if isinstance(sub_m.get('outcomes'), str) else sub_m.get('outcomes')
                 sub_pri = json.loads(sub_m.get('outcomePrices')) if isinstance(sub_m.get('outcomePrices'), str) else sub_m.get('outcomePrices')
-                sub_vol = float(sub_m.get('volume', 0))
+                sub_vol = float(sub_m.get('volume', 0) or 0)
                 
                 sub_data = {
                     "question": sub_m.get('question', title),
@@ -501,7 +502,6 @@ def process_polymarket_event(event):
 def fetch_polymarket_v5_simple(limit=60):
     """Fetch Top Markets for Homepage"""
     try:
-        # Fetch more to allow for filtering
         url = "https://gamma-api.polymarket.com/events?limit=100&closed=false"
         resp = requests.get(url, timeout=8).json()
         markets = []
@@ -522,12 +522,11 @@ def search_market_data_list(user_query):
     candidates = []
     try:
         exa = Exa(EXA_API_KEY)
-        # Force English keywords for better search
         keywords = generate_keywords(user_query) 
         
         search_resp = exa.search(
             f"site:polymarket.com {keywords}",
-            num_results=15, # Increased from 5 to 15
+            num_results=15, # Robust number
             type="neural",
             include_domains=["polymarket.com"]
         )
@@ -544,14 +543,13 @@ def search_market_data_list(user_query):
                 data = requests.get(api_url, timeout=5).json()
                 
                 if data and isinstance(data, list):
-                    # Use the UNIFIED processor
                     market_data = process_polymarket_event(data[0])
                     if market_data:
                         candidates.append(market_data)
     except: pass
     return candidates[:10]
 
-# --- 🔥 D. AGENT LOGIC (Dual Engine) ---
+# --- 🔥 D. AGENT LOGIC ---
 def generate_keywords(user_text):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -569,13 +567,14 @@ def get_agent_response(history, market_data):
     first_query = history[0]['content'] if history else ""
     is_cn = is_chinese_input(first_query)
     
-    # 1. Market Context Construction
+    # 1. Market Context
     if market_data:
+        odds_info = market_data['odds']
         if is_cn:
             market_context = f"""
             ✅ **[真实资金定价] Polymarket 数据**
             - **问题:** {market_data['title']}
-            - **当前赔率 (Top 3):** {market_data['odds']}
+            - **当前赔率 (Top 3):** {odds_info}
             - **资金量:** {market_data['volume']}
             
             **指令:** 市场赔率是“聪明的钱”打出的共识。如果新闻情绪与赔率不符（例如新闻说‘大概率发生’但赔率只有20%），则存在【预期差交易机会】。
@@ -584,7 +583,7 @@ def get_agent_response(history, market_data):
             market_context = f"""
             ✅ **[MARKET PRICING] Polymarket Data**
             - **Market:** {market_data['title']}
-            - **Top 3 Odds:** {market_data['odds']}
+            - **Top 3 Odds:** {odds_info}
             - **Volume:** {market_data['volume']}
             
             **INSTRUCTION:** Odds represent "Smart Money". If news hype disagrees with odds, identify the **Mispricing**.
@@ -595,15 +594,15 @@ def get_agent_response(history, market_data):
         else:
             market_context = "❌ **NO DIRECT MARKET DATA**."
 
-    # 2. System Prompt Selection (PM MODE v19.0)
+    # 2. System Prompt (PM Mode)
     if is_cn:
         system_prompt = f"""
         你是一位管理亿级美元资金的 **全球宏观对冲基金经理 (Global Macro PM)**。
         当前日期: {current_date}
         
         **核心指令:**
-        1. **直接输出:** 不要自我介绍，不要说“作为一名基金经理”，直接开始分析。
-        2. **逻辑自洽:** 严禁逻辑断层（如看空法币却做多美元）。
+        1. **直接输出:** 不要自我介绍，直接开始分析。
+        2. **逻辑自洽:** 严禁逻辑断层。
         3. **强制链接:** 提到标的时必须加链接 (如 [NVDA](https://finance.yahoo.com/quote/NVDA))。
         4. **语言强制:** **必须全程使用中文回答**。
 
@@ -612,7 +611,7 @@ def get_agent_response(history, market_data):
         --- 基金经理决策备忘录 ---
         
         ### 0. 📰 新闻背景速览 (Context)
-        * **事件还原**: 用通俗语言快速概括发生了什么（小白视角）。
+        * **事件还原**: 用通俗语言概括发生了什么。
         * **背景知识**: 为什么这件事值得关注？
         
         ### 1. 🩸 市场定价 vs 真实逻辑 (The Disconnect)
@@ -625,7 +624,7 @@ def get_agent_response(history, market_data):
         
         ### 3. 🎲 压力测试与情景分析 (Stress Test)
         * **基准情景 (60%)**: [描述] -> 资产影响。
-        * **压力测试 (20%)**: 若核心假设失效（例如利率飙升），最大回撤是多少？对冲能否覆盖？
+        * **压力测试 (20%)**: 若核心假设失效，最大回撤是多少？
         
         ### 4. 💸 交易执行 (The Trade Book)
         * **🎯 核心多头 (Long)**:
@@ -646,7 +645,7 @@ def get_agent_response(history, market_data):
         Current Date: {current_date}
         
         **INSTRUCTIONS:**
-        1. **DIRECT START:** Do NOT introduce yourself. Start immediately with the analysis.
+        1. **DIRECT START:** Do NOT introduce yourself. Start immediately.
         2. **LOGIC:** Maintain strict logical consistency.
         3. **LINKS:** Link all tickers (e.g. [AAPL](https://finance.yahoo.com/quote/AAPL)).
         4. **LANGUAGE:** English Only.
@@ -656,8 +655,8 @@ def get_agent_response(history, market_data):
         --- INVESTMENT MEMORANDUM ---
         
         ### 1. 📰 Context & Background
-        * **What Happened**: Simple explanation for general audience.
-        * **Why it Matters**: Historical context.
+        * **What Happened**: Simple explanation.
+        * **Why it Matters**: Context.
         
         ### 2. 🩸 Consensus vs. Reality (The Disconnect)
         * **Priced In**: What is the market pricing?
@@ -669,7 +668,7 @@ def get_agent_response(history, market_data):
         
         ### 4. 🎲 Stress Test & Scenarios
         * **Base Case**: Impact.
-        * **Stress Test**: What if you are wrong? (Drawdown risk).
+        * **Stress Test**: What if you are wrong?
         
         ### 5. 💸 The Trade Book (Execution)
         * **🎯 Top Longs**: [Ticker+Link] & Thesis.
@@ -762,15 +761,13 @@ st.markdown("<br>", unsafe_allow_html=True)
 # === DISPLAY ANALYSIS & CHAT (Interactive Mode) ===
 if st.session_state.messages and st.session_state.search_stage == "analysis":
     
-    # 1. Market Data Context Card (Always visible at top)
     if st.session_state.current_market:
         m = st.session_state.current_market
-        
-        # Build Sub-Market HTML (Fixed for Multi-Options)
+        # 修复后的无缩进HTML构建，防止被识别为代码块
         markets_html = ""
         for idx, market in enumerate(m.get('markets', []), 1):
             if market['type'] == 'binary':
-                markets_html += f"""
+                markets_html += textwrap.dedent(f"""
                 <div style="background:rgba(255,255,255,0.03); padding:10px; border-radius:6px; margin-bottom:8px; border-left:3px solid #ef4444;">
                     <div style="font-size:0.85rem; color:#e5e7eb; font-weight:600; margin-bottom:6px;">{idx}. {market['question']}</div>
                     <div style="display:flex; gap:10px;">
@@ -785,17 +782,16 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
                     </div>
                     <div style="font-size:0.7rem; color:#6b7280; margin-top:4px; text-align:right;">Vol: ${market['volume']:,.0f}</div>
                 </div>
-                """
+                """)
             else:
                 options_html = ""
-                # Fixed: Sort options correctly
                 try:
                     sorted_opts = sorted(market.get('options', []), key=lambda x: x.get('price', 0), reverse=True)[:5]
                 except: sorted_opts = []
                 
                 for opt in sorted_opts:
                     bar_width = min(opt['price'], 100)
-                    options_html += f"""
+                    options_html += textwrap.dedent(f"""
                     <div style="margin-bottom:4px;">
                         <div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-bottom:2px;">
                             <span style="color:#e5e7eb;">{opt['option']}</span>
@@ -805,16 +801,16 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
                             <div style="background:#fbbf24; height:100%; width:{bar_width}%;"></div>
                         </div>
                     </div>
-                    """
-                markets_html += f"""
+                    """)
+                markets_html += textwrap.dedent(f"""
                 <div style="background:rgba(255,255,255,0.03); padding:10px; border-radius:6px; margin-bottom:8px; border-left:3px solid #fbbf24;">
                     <div style="font-size:0.85rem; color:#e5e7eb; font-weight:600; margin-bottom:8px;">{idx}. {market['question']}</div>
                     {options_html}
                     <div style="font-size:0.7rem; color:#6b7280; margin-top:6px; text-align:right;">Vol: ${market['volume']:,.0f}</div>
                 </div>
-                """
+                """)
         
-        st.markdown(f"""
+        st.markdown(textwrap.dedent(f"""
         <div style="background:rgba(20,0,0,0.8); border-left:4px solid #ef4444; padding:15px; border-radius:8px; margin-bottom:20px;">
             <div style="font-size:0.8rem; color:#9ca3af; text-transform:uppercase;">🎯 Selected Prediction Market Event</div>
             <div style="font-size:1.2rem; color:#e5e7eb; font-weight:bold; margin-top:5px; margin-bottom:15px;">{m['title']}</div>
@@ -835,7 +831,7 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
             
             <a href="{m['url']}" target="_blank" style="display:inline-block; margin-top:10px; color:#fca5a5; font-size:0.8rem; text-decoration:none;">🔗 View on Polymarket</a>
         </div>
-        """, unsafe_allow_html=True)
+        """), unsafe_allow_html=True)
     else:
         st.markdown("""
         <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:8px; margin-bottom:20px; text-align:center; color:#6b7280; font-size:0.8rem;">
@@ -863,10 +859,16 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
         st.session_state.search_stage = "input"
         st.rerun()
 
-# ================= 🖥️ DASHBOARD (Only if no analysis active) =================
+# ================= 🖥️ DASHBOARD =================
 if not st.session_state.messages and st.session_state.search_stage == "input":
     col_news, col_markets = st.columns([1, 1], gap="large")
     
+    # ... (Left & Right columns - UNCHANGED) ...
+    # 为了节省篇幅，这里复用您上方代码中的 DASHBOARD 和 FOOTER 逻辑
+    # 只要上面的 SEARCH 和 ANALYSIS 逻辑替换正确即可。
+    
+    # (PASTE THE REST OF YOUR DASHBOARD & FOOTER CODE HERE)
+    # -------------------------------------------------------------------------
     # === LEFT: News Feed ===
     with col_news:
         st.markdown("""
@@ -983,8 +985,7 @@ if not st.session_state.messages and st.session_state.search_stage == "input":
         else:
             st.info("Loading markets...")
 
-# ================= 🌐 7. FOOTER =================
-if not st.session_state.messages and st.session_state.search_stage == "input":
+    # FOOTER
     st.markdown("---")
     st.markdown('<div style="text-align:center; color:#9ca3af; margin:25px 0; font-size:0.8rem; font-weight:700;">🌐 GLOBAL INTELLIGENCE HUB</div>', unsafe_allow_html=True)
     
