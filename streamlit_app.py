@@ -618,173 +618,74 @@ def verify_news_with_exa(query):
 
 def search_market_data_list(user_query):
     """
-    🔥 ENHANCED: Search Markets by Keyword - TRIPLE ENGINE
-    使用三种方法确保找到相关市场：
-    1. Direct Polymarket API Search (Primary)
-    2. Enhanced Exa Search with better queries (Secondary)
-    3. Keyword-based Polymarket Browse (Tertiary)
+    Search Markets by Keyword - DUAL ENGINE (Exa + Direct API)
+    To fix issues when Exa is down or not indexing specific markets.
     """
     candidates = []
     seen_slugs = set()
     
-    # 生成搜索关键词
-    keywords = generate_keywords(user_query)
+    # 1. Generate Keywords (Use the reliable older prompt)
+    keywords = generate_keywords(user_query) 
     
     # --- Engine A: Direct Polymarket API Search (Primary & Fast) ---
     try:
-        # 使用多个关键词变体来搜索
-        search_terms = [keywords, user_query[:50]]  # 原始关键词 + 截断的原文
+        # Search specifically for open markets matching keywords
+        # 🔥 FIX: Encode the keyword to handle spaces/Chinese correctly
+        encoded_kw = urllib.parse.quote(keywords)
+        direct_url = f"https://gamma-api.polymarket.com/events?q={encoded_kw}&limit=10&closed=false"
+        direct_resp = requests.get(direct_url, timeout=5)
         
-        for term in search_terms:
-            direct_url = f"https://gamma-api.polymarket.com/events?q={urllib.parse.quote(term)}&limit=15&closed=false"
-            direct_resp = requests.get(direct_url, timeout=5)
-            
-            if direct_resp.status_code == 200:
-                direct_data = direct_resp.json()
-                if isinstance(direct_data, list):
-                    for event in direct_data:
-                        slug = event.get('slug')
-                        if slug and slug not in seen_slugs:
-                            market_data = process_polymarket_event(event)
-                            if market_data:
-                                candidates.append(market_data)
-                                seen_slugs.add(slug)
+        if direct_resp.status_code == 200:
+            direct_data = direct_resp.json()
+            if isinstance(direct_data, list):
+                for event in direct_data:
+                    slug = event.get('slug')
+                    if slug and slug not in seen_slugs:
+                        market_data = process_polymarket_event(event)
+                        if market_data:
+                            candidates.append(market_data)
+                            seen_slugs.add(slug)
     except: pass
 
-    # --- Engine B: Enhanced Exa Search (Secondary / Semantic Backup) ---
+    # --- Engine B: Exa Search (Secondary / Semantic Backup) ---
     if EXA_AVAILABLE and EXA_API_KEY:
         try:
             exa = Exa(EXA_API_KEY)
-            
-            # 🔥 FIX: 使用多种搜索策略，并增加搜索范围
-            search_queries = [
-                # 策略1: 直接站点搜索 + 关键词
+            search_resp = exa.search(
                 f"site:polymarket.com {keywords}",
-                # 策略2: 站点搜索 + 原文片段
-                f"site:polymarket.com {user_query[:80]}",
-                # 策略3: 更宽泛的搜索
-                f"polymarket prediction {keywords}",
-                # 策略4: 只搜索event页面
-                f"site:polymarket.com/event {keywords}",
-            ]
+                num_results=15, 
+                type="neural",
+                include_domains=["polymarket.com"]
+            )
             
-            for search_query in search_queries:
-                try:
-                    # 尝试两种搜索类型
-                    for search_type in ["neural", "keyword"]:
-                        try:
-                            search_resp = exa.search(
-                                search_query,
-                                num_results=25,  # 进一步增加结果数量
-                                type=search_type,
-                                include_domains=["polymarket.com"],
-                                use_autoprompt=True if search_type == "neural" else False
-                            )
-                            
-                            for result in search_resp.results:
-                                # 🔥 FIX: 更强大的URL解析，支持更多格式
-                                patterns = [
-                                    r'polymarket\.com/event/([^/?#]+)',
-                                    r'polymarket\.com/market/([^/?#]+)',
-                                    r'polymarket\.com/markets/([^/?#]+)',
-                                    r'polymarket\.com/([a-z0-9\-]+)/?$'  # 匹配根路径后的slug
-                                ]
-                                
-                                slug = None
-                                for pattern in patterns:
-                                    match = re.search(pattern, result.url.lower())
-                                    if match:
-                                        raw_slug = match.group(1).split('?')[0].split('#')[0]
-                                        # 过滤掉非slug路径
-                                        if raw_slug not in ['event', 'events', 'market', 'markets', 'about', 'blog']:
-                                            slug = raw_slug
-                                            break
-                                
-                                if slug and slug not in seen_slugs:
-                                    seen_slugs.add(slug)
-                                    
-                                    # 尝试获取市场数据
-                                    try:
-                                        api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
-                                        api_resp = requests.get(api_url, timeout=5)
-                                        
-                                        if api_resp.status_code == 200:
-                                            data = api_resp.json()
-                                            
-                                            if data and isinstance(data, list) and len(data) > 0:
-                                                market_data = process_polymarket_event(data[0])
-                                                if market_data:
-                                                    candidates.append(market_data)
-                                    except: 
-                                        continue
-                        except: 
-                            continue
-                                    
-                except Exception as e:
-                    continue
-        except: 
-            pass
-    
-    # --- Engine C: Keyword-based Polymarket Browse (Tertiary) ---
-    # 如果前面的方法都失败了，尝试浏览热门市场并进行关键词匹配
-    if len(candidates) < 3:
-        try:
-            browse_url = "https://gamma-api.polymarket.com/events?closed=false&limit=100"
-            browse_resp = requests.get(browse_url, timeout=5)
-            
-            if browse_resp.status_code == 200:
-                browse_data = browse_resp.json()
-                if isinstance(browse_data, list):
-                    # 关键词匹配评分
-                    keyword_list = keywords.lower().split()
-                    query_words = user_query.lower().split()
+            for result in search_resp.results:
+                match = re.search(r'polymarket\.com/event/([^/]+)', result.url)
+                if match:
+                    # Critical: Clean slug to avoid 404s from query params
+                    slug_raw = match.group(1)
+                    slug = slug_raw.split('?')[0]
                     
-                    for event in browse_data:
-                        slug = event.get('slug')
-                        if slug in seen_slugs:
-                            continue
-                            
-                        title = event.get('title', '').lower()
-                        description = event.get('description', '').lower()
-                        
-                        # 简单的关键词匹配评分
-                        score = 0
-                        for kw in keyword_list:
-                            if kw in title: score += 3
-                            if kw in description: score += 1
-                        
-                        for word in query_words[:10]:  # 只检查前10个词
-                            if len(word) > 3:  # 忽略短词
-                                if word in title: score += 1
-                        
-                        # 如果有足够的匹配度，添加到候选
-                        if score >= 2:
-                            market_data = process_polymarket_event(event)
-                            if market_data:
-                                candidates.append((score, market_data))
-                                seen_slugs.add(slug)
+                    if slug in seen_slugs: continue
+                    seen_slugs.add(slug)
                     
-                    # 按分数排序并提取市场数据
-                    candidates_sorted = sorted(candidates, key=lambda x: x[0] if isinstance(x, tuple) else 0, reverse=True)
-                    candidates = [m[1] if isinstance(m, tuple) else m for m in candidates_sorted]
+                    api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
+                    data = requests.get(api_url, timeout=5).json()
+                    
+                    if data and isinstance(data, list):
+                        market_data = process_polymarket_event(data[0])
+                        if market_data:
+                            candidates.append(market_data)
         except: pass
     
-    # 移除重复项（基于slug）并返回
-    unique_candidates = []
-    unique_slugs = set()
-    for c in candidates:
-        if isinstance(c, dict) and c.get('slug') not in unique_slugs:
-            unique_candidates.append(c)
-            unique_slugs.add(c.get('slug'))
-    
-    return unique_candidates[:20]  # 最多返回20个结果
+    return candidates
 
-# --- 🔥 D. AGENT LOGIC (REVERTED KEYWORDS + NEW CONTEXT + GOOGLE SEARCH) ---
+# --- 🔥 D. AGENT LOGIC (REVERTED KEYWORDS + NEW CONTEXT) ---
 def generate_keywords(user_text):
     # REVERTED TO OLD (WORKING) PROMPT
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
-        prompt = f"Extract 2-3 most critical keywords from this news to search on a prediction market. **CRITICAL: Translate keywords to English if input is Chinese.** Return ONLY keywords separated by spaces. Input: {user_text}"
+        # Instructing to translate to English specifically for Polymarket search
+        prompt = f"Translate this news topic into 2-3 simple English keywords for searching on Polymarket. Example: 'SpaceX上市' -> 'SpaceX IPO'. Input: {user_text}"
         resp = model.generate_content(prompt)
         return resp.text.strip()
     except: return user_text
@@ -847,7 +748,7 @@ def generate_market_context(market_data, is_cn=True):
 {sub_markets_str}
 
 **💡 你的新闻共识探测器解读**
-1. **市场定价 vs. 新闻情绪**：当前市场认为此事发生的可能性为 **{prob:.0%}**。如果你的新闻源显得更乐观或更悲观，就存在值得探究的"预期差"。
+1. **市场定价 vs. 新闻情绪**：当前市场认为此事发生的可能性为 **{prob:.0%}**。如果你的新闻源显得更乐观或更悲观，就存在值得探究的“预期差”。
 2. **共识强度与趋势**：市场信心正在 **{trend_text}**，且流动性水平表明该共识的可靠性 **{confidence_text}**。
 3. **使用建议**：可将此 **{prob:.0%}** 的概率作为你判断该新闻可信度的**中性基准**。若新闻观点与此概率偏离极大，请务必警惕并寻找更多佐证。
 """
@@ -872,9 +773,7 @@ def generate_market_context(market_data, is_cn=True):
     return market_context
 
 def get_agent_response(history, market_data):
-    # 使用标准Gemini模型
     model = genai.GenerativeModel('gemini-2.5-flash')
-    
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
     first_query = history[0]['content'] if history else ""
     is_cn = is_chinese_input(first_query)
@@ -1003,14 +902,7 @@ def get_agent_response(history, market_data):
         api_messages.append({"role": role, "parts": [msg['content']]})
         
     try:
-        # 标准生成，Gemini会根据prompt指令自行判断是否需要额外信息
-        response = model.generate_content(
-            api_messages,
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.7,
-                max_output_tokens=4096,
-            )
-        )
+        response = model.generate_content(api_messages)
         return response.text
     except Exception as e:
         return f"Agent Analysis Failed: {str(e)}"
@@ -1326,3 +1218,4 @@ if not st.session_state.messages and st.session_state.search_stage == "input":
             </a>
             """, unsafe_allow_html=True)
     st.markdown("<br><br>", unsafe_allow_html=True)
+
