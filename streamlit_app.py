@@ -561,37 +561,60 @@ def fetch_polymarket_v5_simple(limit=60, sort_mode='volume'):
         return []
 
 def search_market_data_list(user_query):
-    """Search Markets by Keyword"""
-    if not EXA_AVAILABLE or not EXA_API_KEY: return []
+    """Search Markets by Keyword - Dual Engine (Exa + Direct API)"""
+    # 1. Generate Keywords (Always needed)
+    keywords = generate_keywords(user_query)
+    
     candidates = []
+    seen_slugs = set()
+
+    # --- Engine A: Direct Polymarket API Search (The "Backup" that often works better) ---
     try:
-        exa = Exa(EXA_API_KEY)
-        keywords = generate_keywords(user_query) 
+        # Using English keywords against Polymarket's search endpoint
+        direct_url = f"https://gamma-api.polymarket.com/events?q={keywords}&limit=10&closed=false"
+        direct_resp = requests.get(direct_url, timeout=5).json()
         
-        search_resp = exa.search(
-            f"site:polymarket.com {keywords}",
-            num_results=25, # Boosted search depth
-            type="neural",
-            include_domains=["polymarket.com"]
-        )
-        
-        seen_slugs = set()
-        for result in search_resp.results:
-            match = re.search(r'polymarket\.com/event/([^/]+)', result.url)
-            if match:
-                slug = match.group(1)
-                if slug in seen_slugs: continue
-                seen_slugs.add(slug)
-                
-                api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
-                data = requests.get(api_url, timeout=5).json()
-                
-                if data and isinstance(data, list):
-                    market_data = process_polymarket_event(data[0])
+        if isinstance(direct_resp, list):
+            for event in direct_resp:
+                slug = event.get('slug')
+                if slug and slug not in seen_slugs:
+                    market_data = process_polymarket_event(event)
                     if market_data:
                         candidates.append(market_data)
+                        seen_slugs.add(slug)
     except: pass
-    return candidates # Return all found
+
+    # --- Engine B: Exa Search (The "Semantic" Search) ---
+    if EXA_AVAILABLE and EXA_API_KEY:
+        try:
+            exa = Exa(EXA_API_KEY)
+            search_resp = exa.search(
+                f"site:polymarket.com {keywords}",
+                num_results=15, 
+                type="neural",
+                include_domains=["polymarket.com"]
+            )
+            
+            for result in search_resp.results:
+                match = re.search(r'polymarket\.com/event/([^/]+)', result.url)
+                if match:
+                    slug = match.group(1)
+                    # Clean slug (sometimes Exa returns url params)
+                    if '?' in slug: slug = slug.split('?')[0]
+                    
+                    if slug in seen_slugs: continue
+                    seen_slugs.add(slug)
+                    
+                    api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
+                    data = requests.get(api_url, timeout=5).json()
+                    
+                    if data and isinstance(data, list):
+                        market_data = process_polymarket_event(data[0])
+                        if market_data:
+                            candidates.append(market_data)
+        except: pass
+    
+    return candidates # Return combined results
 
 # --- 🔥 D. AGENT LOGIC (INTEGRATED) ---
 def generate_keywords(user_text):
@@ -619,17 +642,17 @@ def generate_market_context(market_data, is_cn=True):
     # 假设 market_data 包含字段：title, probability, volume, liquidity, change_24h, url
     title = market_data.get('title', 'N/A')
     prob = market_data.get('probability', 0)  # 例如：0.72 表示72%
-    # 这里我们传入 vol_str ($50M) 以保证显示美观
-    volume = market_data.get('vol_str', 'N/A') 
+    volume = market_data.get('vol_str', 'N/A') # Use formatted string from fetcher
     liquidity = market_data.get('liquidity', 0)
     change_24h = market_data.get('change_24h', 0)  # 例如：0.05 表示概率上升5个百分点
     url = market_data.get('url', '#')
     
     # 动态判断文本
     trend_text = "上涨" if change_24h > 0 else "下跌" if change_24h < 0 else "持平"
-    trend_text_en = "up" if change_24h > 0 else "down" if change_24h < 0 else "flat"
-    
     confidence_text = "高" if liquidity > 100000 else "中等" if liquidity > 10000 else "较低"  # 假设流动性阈值
+    
+    # English equivalents for English Mode
+    trend_text_en = "up" if change_24h > 0 else "down" if change_24h < 0 else "flat"
     confidence_text_en = "High" if liquidity > 100000 else "Medium" if liquidity > 10000 else "Low"
 
     if is_cn:
@@ -670,7 +693,7 @@ def get_agent_response(history, market_data):
     first_query = history[0]['content'] if history else ""
     is_cn = is_chinese_input(first_query)
     
-    # 1. Market Context (Using NEW Logic)
+    # 1. Market Context (Using NEW DeepSeek Logic)
     market_context = generate_market_context(market_data, is_cn)
 
     # 2. System Prompt (PM Mode)
@@ -697,6 +720,7 @@ def get_agent_response(history, market_data):
         * **当前共识**: 市场目前Price-in了什么？基于预测市场数据，市场目前如何看待这件事？市场情绪是乐观还是悲观？
         * **预期差**: 你的差异化观点是什么？
         * **其他市场信号**: 如有，补充其他相关市场数据（例如，相关公司的股价、搜索指数等）。
+        
         
         ### 2. 多角度分析 (Multi-perspective Analysis)
         * **支持方观点**: 列出支持事件发生的理由和主要支持者。
@@ -749,6 +773,7 @@ def get_agent_response(history, market_data):
         * **Current Consensus**: What is currently Price-in by the market? Based on prediction market data, how does the market currently view this event? Is the market sentiment optimistic or pessimistic?
         * **The Gap**: What is your differentiated view?
         * **Other Market Signals**: If any, supplement with other relevant market data (e.g., related company stock prices, search indices, etc.).
+        
         
         ### 2. Multi-perspective Analysis (Multi-perspective Analysis)
         * **Proponent View**: List reasons supporting the event's occurrence and main supporters.
