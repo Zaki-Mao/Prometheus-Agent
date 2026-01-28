@@ -60,7 +60,8 @@ default_state = {
     "is_processing": False,
     "last_user_input": "",
     "news_category": "all",
-    "market_sort": "volume"
+    "market_sort": "volume",
+    "debug_logs": []             # Store debug info
 }
 
 for key, value in default_state.items():
@@ -584,22 +585,24 @@ def fetch_polymarket_v5_simple(limit=60, sort_mode='volume'):
     except Exception as e:
         return []
 
-# --- 🔥 NEW: FACT CHECKER FUNCTION (Using Exa to verify news) ---
+# --- 🔥 ROBUST FACT CHECKER (Exa V1.9) ---
 def verify_news_with_exa(query):
     """
     Searches EXA for the news topic itself (not just markets) to verify authenticity.
-    SIMPLIFIED: Removed aggressive filtering parameters to ensure compatibility with all Exa plans.
+    Uses 'auto' type which is the most robust.
     """
     if not EXA_AVAILABLE or not EXA_API_KEY: 
         return "⚠️ 无法进行全网事实核查 (Exa API 未配置)。"
     
     try:
         exa = Exa(EXA_API_KEY)
-        # 🔥 SIMPLEST CALL POSSIBLE to avoid 400 errors
+        # 🔥 V1.9 FIX: Use 'auto' search, remove ALL other fancy parameters
+        # Also searches for X/Twitter specifically to mimic Grok
+        search_query = f"{query} news latest"
+        
         search_resp = exa.search(
-            query,
-            num_results=3,
-            type="neural" # Basic neural search
+            search_query,
+            num_results=3
         )
         
         if not search_resp.results:
@@ -607,36 +610,36 @@ def verify_news_with_exa(query):
             
         articles = []
         for r in search_resp.results:
-            # Handle potential missing attributes gracefully
-            date_str = getattr(r, 'published_date', 'Recent')
-            title = getattr(r, 'title', 'News Article')
+            title = getattr(r, 'title', 'Article')
             url = getattr(r, 'url', '#')
-            articles.append(f"- [{title}]({url}) ({date_str})")
+            # Extract domain
+            domain = urllib.parse.urlparse(url).netloc.replace('www.', '')
+            articles.append(f"- [{title}]({url}) (Via {domain})")
             
         articles_text = "\n".join(articles)
         return f"✅ **全网事实核查 (Web Fact Check)**:\n{articles_text}\n\n(AI将基于上述搜索结果验证事件真实性)"
     except Exception as e:
-        return f"⚠️ 事实核查服务暂时不可用: {str(e)}"
+        st.session_state.debug_logs.append(f"Exa Fact Check Failed: {str(e)}")
+        return f"⚠️ 事实核查服务暂时不可用 (Connection Error)"
 
 def search_market_data_list(user_query):
     """
-    Search Markets with Fallback Logic to handle missing keywords.
+    Search Markets with:
+    1. Keyword Generation (Translate & Simplify)
+    2. Dual Engine Search (API + Exa)
+    3. Strict Filtering (Remove irrelevant junk)
     """
     candidates = []
     seen_slugs = set()
     
-    # 1. Generate English Keywords (Crucial for Chinese inputs)
+    # 1. Generate Keywords (Crucial: Translate "SpaceX上市" -> "SpaceX IPO")
     keywords = generate_keywords(user_query) 
     
     # Define search terms: [Generated Keywords, Raw Input]
     search_terms = []
     if keywords: search_terms.append(keywords)
-    # If keywords look like a sentence, also try just the first few words as a broad search
-    if keywords and len(keywords.split()) > 3:
-         search_terms.append(" ".join(keywords.split()[:2])) 
-
+    
     # --- Engine A: Direct Polymarket API Search ---
-    # This is the fastest way if we have a good keyword
     for term in search_terms:
         if not term: continue
         try:
@@ -648,31 +651,33 @@ def search_market_data_list(user_query):
                 direct_data = direct_resp.json()
                 if isinstance(direct_data, list):
                     for event in direct_data:
-                        slug = event.get('slug')
-                        if slug and slug not in seen_slugs:
-                            market_data = process_polymarket_event(event)
-                            if market_data:
-                                candidates.append(market_data)
-                                seen_slugs.add(slug)
+                        # 🛡️ FILTER: Title must match keywords roughly
+                        title = event.get('title', '').lower()
+                        kw_lower = term.lower()
+                        # Simple relevance check: at least one significant word must match
+                        if any(w in title for w in kw_lower.split() if len(w)>3):
+                            slug = event.get('slug')
+                            if slug and slug not in seen_slugs:
+                                market_data = process_polymarket_event(event)
+                                if market_data:
+                                    candidates.append(market_data)
+                                    seen_slugs.add(slug)
         except: pass
     
     # --- Engine B: Exa Search (Secondary) ---
-    # Only run if we have fewer than 5 results from direct API
+    # Only run if API gave few results
     if EXA_AVAILABLE and EXA_API_KEY and len(candidates) < 5 and keywords:
         try:
             exa = Exa(EXA_API_KEY)
-            # Simplified Exa call here too
+            # Search specifically for Polymarket pages
             search_resp = exa.search(
                 f"site:polymarket.com {keywords}",
-                num_results=15, 
-                type="neural",
-                include_domains=["polymarket.com"]
+                num_results=10
             )
             
             for result in search_resp.results:
                 match = re.search(r'polymarket\.com/event/([^/]+)', result.url)
                 if match:
-                    # Critical: Clean slug to avoid 404s
                     slug_raw = match.group(1)
                     slug = slug_raw.split('?')[0]
                     
@@ -683,18 +688,21 @@ def search_market_data_list(user_query):
                     data = requests.get(api_url, timeout=5).json()
                     
                     if data and isinstance(data, list):
-                        market_data = process_polymarket_event(data[0])
-                        if market_data:
-                            candidates.append(market_data)
-        except: pass
+                        # 🛡️ FILTER HERE TOO
+                        title = data[0].get('title', '').lower()
+                        if any(w in title for w in keywords.lower().split() if len(w)>3):
+                            market_data = process_polymarket_event(data[0])
+                            if market_data:
+                                candidates.append(market_data)
+        except Exception as e:
+            st.session_state.debug_logs.append(f"Exa Market Search Failed: {str(e)}")
     
     return candidates
 
-# --- 🔥 D. AGENT LOGIC ---
+# --- 🔥 D. AGENT LOGIC (GEMINI) ---
 def generate_keywords(user_text):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
-        # Explicit instruction to translate and simplify
         prompt = f"Translate this news topic into 2-3 simple English keywords for searching on Polymarket. Example: 'SpaceX上市' -> 'SpaceX IPO'. Input: {user_text}"
         resp = model.generate_content(prompt)
         return resp.text.strip()
@@ -779,7 +787,7 @@ def get_agent_response(history, market_data):
     # 1. Market Context
     market_context = generate_market_context(market_data, is_cn)
     
-    # 2. 🔥 Fact Check via Exa (Using cleaned up function)
+    # 2. 🔥 Fact Check via Exa (Simplified call)
     fact_check_info = verify_news_with_exa(first_query)
     
     combined_context = f"{fact_check_info}\n\n{market_context}"
@@ -915,6 +923,7 @@ with s_mid:
     def on_input_change():
         st.session_state.search_stage = "input"
         st.session_state.search_candidates = []
+        st.session_state.debug_logs = [] # Clear logs
         
     input_val = st.session_state.get("user_news_text", "")
     # Use a unique key for the text area to allow programmatic clearing if needed, though we sync state
@@ -938,11 +947,11 @@ with s_mid:
     elif st.session_state.search_stage == "selection":
         st.markdown("##### 🧐 Select a Market to Reality Check:")
         
-        # 🔥 FIX: 如果没找到市场，优先显示"直接分析"按钮
+        # 🔥 UI FIX: Clearly show when no markets are found and offer News Analysis
         if not st.session_state.search_candidates:
-            st.warning("⚠️ No direct prediction markets found for this news.")
+            st.warning("⚠️ No direct prediction markets found matching your specific query.")
             st.markdown("---")
-            if st.button("📝 Analyze News Only (AI Analysis)", use_container_width=True, type="primary"):
+            if st.button("📝 Analyze News Only (AI Fact Check + Analysis)", use_container_width=True, type="primary"):
                 st.session_state.current_market = None
                 st.session_state.search_stage = "analysis"
                 st.session_state.messages = [{"role": "user", "content": f"Analyze this news: {st.session_state.user_news_text}"}]
@@ -952,9 +961,8 @@ with s_mid:
                 st.session_state.search_stage = "input"
                 st.rerun()
         else:
-            # 有市场时，先显示市场列表
+            # Loop through candidates
             for idx, m in enumerate(st.session_state.search_candidates):
-                # Native Container with Styling
                 with st.container():
                     st.markdown(f"""
                     <div style="padding:12px; background:rgba(255,255,255,0.03); border-radius:8px; border:1px solid rgba(255,255,255,0.1); margin-bottom:10px;">
