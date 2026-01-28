@@ -633,33 +633,42 @@ def get_agent_response(history, market_data):
         
         --- 基金经理决策备忘录 ---
         
-        ### 0. 📰 新闻背景速览 (Context)
+        ### 0. 新闻背景速览 (Context)
         * **事件还原**: 用通俗语言概括发生了什么。
         * **背景知识**: 为什么这件事值得关注？
         
-        ### 1. 🩸 市场定价 vs 真实逻辑 (The Disconnect)
-        * **当前共识**: 市场目前Price-in了什么？
+        ### 1. 市场情绪与共识 (Market Sentiment & Consensus)
+        * **当前共识**: 市场目前Price-in了什么？基于预测市场数据，市场目前如何看待这件事？市场情绪是乐观还是悲观？
         * **预期差**: 你的差异化观点是什么？
+        * **其他市场信号**: 如有，补充其他相关市场数据（例如，相关公司的股价、搜索指数等）。
         
-        ### 2. 🕵️‍♂️ 归因与博弈 (Attribution)
-        * **驱动力**: 资金面还是基本面？
-        * **关键博弈方**: 谁获益？谁受损？
         
-        ### 3. 🎲 压力测试与情景分析 (Stress Test)
-        * **基准情景 (60%)**: [描述] -> 资产影响。
-        * **压力测试 (20%)**: 若核心假设失效，最大回撤是多少？
+        ### 2. 多角度分析 (Multi-perspective Analysis)
+        * **支持方观点**: 列出支持事件发生的理由和主要支持者。
+        * **反对方观点**: 列出反对事件发生的理由和主要反对者。
+        * **中立/第三方观点**: 提供其他角度或中立观点。
+
+        ### 3. 事实核查与验证 (Fact Check & Verification)
+        * **信息来源可靠性***: 评估新闻来源的可信度。
+        * **相关证据***: 列出已知事实或证据，支持或反驳该新闻。
+        * **专家观点***: 如有，汇总专家意见。
         
-        ### 4. 💸 交易执行 (The Trade Book)
-        * **🎯 核心多头 (Long)**:
+        ### 4. 影响分析 (Impact Analysis)
+        * **如果发生**:事件发生会带来哪些影响？（对行业、市场、社会等） -> 资产影响。
+        * **如果不发生**: 事件不发生会如何？若核心假设失效，最大回撤是多少？
+        * **时间线**: 事件可能的时间线是怎么样的？
+        
+        ### 5. 交易执行 (The Trade Book)
+        * **核心多头 (Long)**:
             * **标的**: [代码+链接]
             * **头寸**: 建议仓位。
             * **逻辑**: 为什么买它？
-        * **📉 核心空头/对冲 (Short/Hedge)**:
+        * **核心空头/对冲 (Short/Hedge)**:
             * **标的**: [代码+链接]
             * **逻辑**: 对冲什么风险？
         * **⏳ 期限**: 持仓多久？
             
-        ### 5. 🏁 最终指令 (PM Conclusion)
+        ### 6. 最终指令 (PM Conclusion)
         * 一句话总结交易方向。
         """
     else:
@@ -677,29 +686,43 @@ def get_agent_response(history, market_data):
         
         --- INVESTMENT MEMORANDUM ---
         
-        ### 1. 📰 Context & Background
-        * **What Happened**: Simple explanation.
-        * **Why it Matters**: Context.
+        ### 0. News Context Snapshot (Context)
+        * **Event Recap**: Summarize what happened in plain language.
+        * **Background Knowledge**: Why does this matter?
         
-        ### 2. 🩸 Consensus vs. Reality (The Disconnect)
-        * **Priced In**: What is the market pricing?
-        * **The Edge**: What is the market missing?
+        ### 1. Market Sentiment & Consensus (Market Sentiment & Consensus)
+        * **Current Consensus**: What is currently Price-in by the market? Based on prediction market data, how does the market currently view this event? Is the market sentiment optimistic or pessimistic?
+        * **The Gap**: What is your differentiated view?
+        * **Other Market Signals**: If any, supplement with other relevant market data (e.g., related company stock prices, search indices, etc.).
         
-        ### 3. 🕵️‍♂️ Attribution & Game Theory
-        * **Drivers**: Fundamental or Flow?
-        * **Cui Bono**: Who benefits?
         
-        ### 4. 🎲 Stress Test & Scenarios
-        * **Base Case**: Impact.
-        * **Stress Test**: What if you are wrong?
+        ### 2. Multi-perspective Analysis (Multi-perspective Analysis)
+        * **Proponent View**: List reasons supporting the event's occurrence and main supporters.
+        * **Opponent View**: List reasons opposing the event's occurrence and main opponents.
+        * **Neutral/Third-party View**: Provide other angles or neutral perspectives.
+
+        ### 3. Fact Check & Verification (Fact Check & Verification)
+        * **Source Reliability**: Evaluate the credibility of the news source.
+        * **Relevant Evidence**: List known facts or evidence that support or refute the news.
+        * **Expert Opinions**: If any, summarize expert opinions.
         
-        ### 5. 💸 The Trade Book (Execution)
-        * **🎯 Top Longs**: [Ticker+Link] & Thesis.
-        * **📉 Shorts / Hedges**: [Ticker+Link] & Rationale.
-        * **⏳ Structure**: Duration/Instrument.
+        ### 4. Impact Analysis (Impact Analysis)
+        * **If It Happens**: What impacts will the event bring? (To industry, market, society, etc.) -> Asset Impact.
+        * **If It Doesn't Happen**: What happens if the event does not occur? If the core assumption fails, what is the maximum drawdown?
+        * **Timeline**: What is the potential timeline of the event?
+        
+        ### 5. Trade Execution (The Trade Book)
+        * **Core Long (Long)**:
+            * **Ticker**: [Code+Link]
+            * **Position**: Suggested sizing.
+            * **Logic**: Why buy it?
+        * **Core Short/Hedge (Short/Hedge)**:
+            * **Ticker**: [Code+Link]
+            * **Logic**: What risk to hedge?
+        * **⏳ Duration**: How long to hold?
             
-        ### 6. 🏁 PM Conclusion
-        * Bottom line instruction.
+        ### 6. Final Verdict (PM Conclusion)
+        * One-sentence summary of trading direction.
         """
     
     api_messages = [{"role": "user", "parts": [system_prompt]}]
@@ -1011,4 +1034,5 @@ if not st.session_state.messages and st.session_state.search_stage == "input":
             </a>
             """, unsafe_allow_html=True)
     st.markdown("<br><br>", unsafe_allow_html=True)
+
 
