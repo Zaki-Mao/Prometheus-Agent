@@ -406,11 +406,10 @@ def fetch_categorized_news_v2():
     }
     return {k: fetch_rss(v, 30) for k, v in feeds.items()}
 
-# --- 🔥 C. Polymarket Fetcher (ENHANCED - supports Sub-markets & Liquidity) ---
+# --- 🔥 C. Polymarket Fetcher ---
 def process_polymarket_event(event):
     """
     Core function to process ANY Polymarket event.
-    Returns standardized data structure tailored for generate_market_context.
     """
     try:
         title = event.get('title', 'Untitled').strip()
@@ -432,8 +431,7 @@ def process_polymarket_event(event):
         vol = float(m.get('volume', 0) or 0)
         if vol < 1000: return None # Filter Dead Markets
         
-        # --- NEW: Extract Data for Context Generator ---
-        # Liquidity
+        # Extract Liquidity
         liquidity = float(m.get('liquidity', 0) or 0)
         
         # 24h Price Change
@@ -453,7 +451,6 @@ def process_polymarket_event(event):
             for i, out in enumerate(outcomes):
                 if i < len(prices):
                     try:
-                        # Price is usually 0.72 in API, convert to percentage for list, keep decimal for context
                         raw_price = float(prices[i]) 
                         prob_percent = raw_price * 100
                         outcome_data.append((str(out), prob_percent, raw_price))
@@ -461,28 +458,25 @@ def process_polymarket_event(event):
         
         if not outcome_data: return None
 
-        # Sort by Probability (High to Low)
+        # Sort by Probability
         outcome_data.sort(key=lambda x: x[1], reverse=True)
         
-        # Get Top Probability (0.0 - 1.0 format) for the Generator
+        # Get Top Probability
         top_prob_decimal = outcome_data[0][2] 
         
-        # Format Top 3 Odds for Display
+        # Format Top 3 Odds
         top_odds = [f"{o}: {p:.1f}%" for o, p, r in outcome_data[:3]]
         odds_str = " | ".join(top_odds)
 
-        # 5. Extract Details for All Sub-Markets (V1.3 UPGRADE)
+        # 5. Extract Details for All Sub-Markets
         all_sub_markets = []
-        # We process the top 6 sub-markets to provide rich context
         for sub_m in markets_list[:6]:
             try:
-                # Basic sub-market data
                 q_text = sub_m.get('question', title)
                 sub_out = json.loads(sub_m.get('outcomes')) if isinstance(sub_m.get('outcomes'), str) else sub_m.get('outcomes')
                 sub_pri = json.loads(sub_m.get('outcomePrices')) if isinstance(sub_m.get('outcomePrices'), str) else sub_m.get('outcomePrices')
                 sub_vol = float(sub_m.get('volume', 0) or 0)
                 
-                # Determine top outcome for this sub-market
                 best_opt = ""
                 best_price = 0.0
                 if sub_out and sub_pri:
@@ -498,18 +492,15 @@ def process_polymarket_event(event):
                         best_opt = temp_ops[0][0]
                         best_price = temp_ops[0][1]
 
-                # Structure for UI
                 sub_data = {
                     "question": q_text,
                     "volume": sub_vol,
                     "type": "binary" if len(sub_out) == 2 else "multiple",
                     "options": [],
-                    # Extra fields for Context Generator
                     "top_option": best_opt,
                     "top_price": best_price
                 }
                 
-                # Fill options for UI
                 if len(sub_out) == 2 and "Yes" in sub_out and "No" in sub_out:
                     y_idx = sub_out.index("Yes")
                     n_idx = sub_out.index("No")
@@ -525,82 +516,64 @@ def process_polymarket_event(event):
                 all_sub_markets.append(sub_data)
             except: continue
 
-        # Return standardized dict matching generate_market_context requirements
         return {
             "title": title,
             "slug": event.get('slug', ''),
             "volume": vol,
-            "vol_str": vol_str, # This is the formatted string (e.g. $50M)
+            "vol_str": vol_str,
             "odds": odds_str,
             "url": f"https://polymarket.com/event/{event.get('slug', '')}",
             "markets": all_sub_markets,
-            
-            # Fields specifically for generate_market_context:
-            "probability": top_prob_decimal, # 0.72
-            "liquidity": liquidity,          # 150000.0
-            "change_24h": change_24h         # 0.05
+            "probability": top_prob_decimal,
+            "liquidity": liquidity,
+            "change_24h": change_24h
         }
     except: return None
 
 @st.cache_data(ttl=60)
 def fetch_polymarket_v5_simple(limit=60, sort_mode='volume'):
-    """
-    Fetch Top Markets for Homepage.
-    Supports server-side sorting with robust fallback.
-    """
     try:
         base_url = "https://gamma-api.polymarket.com/events?closed=false"
-        
-        # 1. Attempt API Sorting (Try sorting by volume or liquidity)
         if sort_mode == 'volume':
-            # Try getting top liquidity/volume events (API dependent)
-            # Increased limit to 500 to catch old whales if API sort fails
             api_url = f"{base_url}&limit=500" 
         else:
-            # Active/Trending
             api_url = f"{base_url}&limit=50"
 
         resp = requests.get(api_url, timeout=12) 
-        
-        # Fallback if API fails
-        if resp.status_code != 200:
-            return []
+        if resp.status_code != 200: return []
 
         data = resp.json()
         markets = []
-        
         if isinstance(data, list):
             for event in data:
                 market_data = process_polymarket_event(event)
                 if market_data:
                     markets.append(market_data)
         
-        # 2. Strong Local Sort (Crucial for "Volume" view)
         if sort_mode == 'volume':
             markets.sort(key=lambda x: x['volume'], reverse=True)
-        # 'active' usually implies the default API return order (Trending)
             
         return markets[:limit]
     except Exception as e:
         return []
 
-# --- 🔥 NEW: FACT CHECKER FUNCTION (Using Exa to verify news) ---
+# --- 🔥 DEBUGGED & ROBUST SEARCH FUNCTIONS ---
+
 def verify_news_with_exa(query):
     """
-    Searches EXA for the news topic itself (not just markets) to verify authenticity.
+    Simpler, more robust Exa Fact Check. 
+    Removes parameters that might cause 400 errors with certain plan tiers or library versions.
     """
     if not EXA_AVAILABLE or not EXA_API_KEY: 
         return "⚠️ 无法进行全网事实核查 (Exa API 未配置)。"
     
     try:
         exa = Exa(EXA_API_KEY)
-        # Search for news articles published in the last 30 days
+        # Simplified call: removed 'use_autoprompt' and 'start_published_date' which often cause issues
         search_resp = exa.search(
             query,
             num_results=3,
-            type="neural",
-            use_autoprompt=True,
-            start_published_date=(datetime.datetime.now() - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
+            type="neural"
         )
         
         if not search_resp.results:
@@ -608,47 +581,59 @@ def verify_news_with_exa(query):
             
         articles = []
         for r in search_resp.results:
-            date_str = r.published_date if r.published_date else "Recent"
-            articles.append(f"- [{r.title}]({r.url}) ({date_str})")
+            # Safely handle published_date if it exists
+            date_str = getattr(r, 'published_date', 'Recent')
+            title = getattr(r, 'title', 'News Article')
+            url = getattr(r, 'url', '#')
+            articles.append(f"- [{title}]({url}) ({date_str})")
             
         articles_text = "\n".join(articles)
         return f"✅ **全网事实核查 (Web Fact Check)**:\n{articles_text}\n\n(AI将基于上述搜索结果验证事件真实性)"
     except Exception as e:
+        # Return the actual error so we can see it in the UI text if needed
         return f"⚠️ 事实核查服务暂时不可用: {str(e)}"
 
 def search_market_data_list(user_query):
     """
-    Search Markets by Keyword - DUAL ENGINE (Exa + Direct API)
-    To fix issues when Exa is down or not indexing specific markets.
+    Search Markets with Fallback Logic to handle missing keywords.
     """
     candidates = []
     seen_slugs = set()
     
-    # 1. Generate Keywords (Use the reliable older prompt)
+    # 1. Generate English Keywords (Crucial for Chinese inputs)
     keywords = generate_keywords(user_query) 
     
-    # --- Engine A: Direct Polymarket API Search (Primary & Fast) ---
-    try:
-        # Search specifically for open markets matching keywords
-        # 🔥 FIX: Encode the keyword to handle spaces/Chinese correctly
-        encoded_kw = urllib.parse.quote(keywords)
-        direct_url = f"https://gamma-api.polymarket.com/events?q={encoded_kw}&limit=10&closed=false"
-        direct_resp = requests.get(direct_url, timeout=5)
-        
-        if direct_resp.status_code == 200:
-            direct_data = direct_resp.json()
-            if isinstance(direct_data, list):
-                for event in direct_data:
-                    slug = event.get('slug')
-                    if slug and slug not in seen_slugs:
-                        market_data = process_polymarket_event(event)
-                        if market_data:
-                            candidates.append(market_data)
-                            seen_slugs.add(slug)
-    except: pass
+    # Define search terms: [Generated Keywords, Raw Input]
+    search_terms = []
+    if keywords: search_terms.append(keywords)
+    # If keywords look like a sentence, also try just the first few words as a broad search
+    if keywords and len(keywords.split()) > 3:
+         search_terms.append(" ".join(keywords.split()[:2])) 
 
-    # --- Engine B: Exa Search (Secondary / Semantic Backup) ---
-    if EXA_AVAILABLE and EXA_API_KEY:
+    # --- Engine A: Direct Polymarket API Search ---
+    # This is the fastest way if we have a good keyword
+    for term in search_terms:
+        if not term: continue
+        try:
+            encoded_kw = urllib.parse.quote(term)
+            direct_url = f"https://gamma-api.polymarket.com/events?q={encoded_kw}&limit=10&closed=false"
+            direct_resp = requests.get(direct_url, timeout=5)
+            
+            if direct_resp.status_code == 200:
+                direct_data = direct_resp.json()
+                if isinstance(direct_data, list):
+                    for event in direct_data:
+                        slug = event.get('slug')
+                        if slug and slug not in seen_slugs:
+                            market_data = process_polymarket_event(event)
+                            if market_data:
+                                candidates.append(market_data)
+                                seen_slugs.add(slug)
+        except: pass
+    
+    # --- Engine B: Exa Search (Secondary) ---
+    # Only run if we have fewer than 5 results from direct API
+    if EXA_AVAILABLE and EXA_API_KEY and len(candidates) < 5 and keywords:
         try:
             exa = Exa(EXA_API_KEY)
             search_resp = exa.search(
@@ -661,7 +646,7 @@ def search_market_data_list(user_query):
             for result in search_resp.results:
                 match = re.search(r'polymarket\.com/event/([^/]+)', result.url)
                 if match:
-                    # Critical: Clean slug to avoid 404s from query params
+                    # Critical: Clean slug to avoid 404s
                     slug_raw = match.group(1)
                     slug = slug_raw.split('?')[0]
                     
@@ -679,12 +664,11 @@ def search_market_data_list(user_query):
     
     return candidates
 
-# --- 🔥 D. AGENT LOGIC (REVERTED KEYWORDS + NEW CONTEXT) ---
+# --- 🔥 D. AGENT LOGIC ---
 def generate_keywords(user_text):
-    # REVERTED TO OLD (WORKING) PROMPT
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
-        # Instructing to translate to English specifically for Polymarket search
+        # Explicit instruction to translate and simplify
         prompt = f"Translate this news topic into 2-3 simple English keywords for searching on Polymarket. Example: 'SpaceX上市' -> 'SpaceX IPO'. Input: {user_text}"
         resp = model.generate_content(prompt)
         return resp.text.strip()
@@ -694,39 +678,27 @@ def is_chinese_input(text):
     return bool(re.search(r'[\u4e00-\u9fff]', text))
 
 def generate_market_context(market_data, is_cn=True):
-    """
-    根据Polymarket数据，生成增强版的市场背景解读 (DeepSeek Logic).
-    """
     if not market_data:
-        # Fallback if no market data is selected
-        if is_cn:
-            return "❌ **无直接预测市场数据** (No direct prediction market found)."
-        else:
-            return "❌ **NO DIRECT MARKET DATA**."
+        if is_cn: return "❌ **无直接预测市场数据** (No direct prediction market found)."
+        else: return "❌ **NO DIRECT MARKET DATA**."
 
-    # 假设 market_data 包含字段：title, probability, volume, liquidity, change_24h, url
     title = market_data.get('title', 'N/A')
-    prob = market_data.get('probability', 0)  # 例如：0.72 表示72%
-    # 这里我们传入 vol_str ($50M) 以保证显示美观
+    prob = market_data.get('probability', 0)
     volume = market_data.get('vol_str', 'N/A') 
     liquidity = market_data.get('liquidity', 0)
-    change_24h = market_data.get('change_24h', 0)  # 例如：0.05 表示概率上升5个百分点
+    change_24h = market_data.get('change_24h', 0)
     url = market_data.get('url', '#')
     
-    # 动态判断文本
     trend_text = "上涨" if change_24h > 0 else "下跌" if change_24h < 0 else "持平"
-    confidence_text = "高" if liquidity > 100000 else "中等" if liquidity > 10000 else "较低"  # 假设流动性阈值
+    confidence_text = "高" if liquidity > 100000 else "中等" if liquidity > 10000 else "较低"
     
-    # English equivalents for English Mode
     trend_text_en = "up" if change_24h > 0 else "down" if change_24h < 0 else "flat"
     confidence_text_en = "High" if liquidity > 100000 else "Medium" if liquidity > 10000 else "Low"
 
-    # --- Generate Sub-market String ---
     sub_markets_str = ""
     if market_data.get('markets'):
         sub_items = []
         for sm in market_data['markets']:
-            # Safe get for sub-market fields
             q = sm.get('question', 'Sub-market')
             top = sm.get('top_option', 'N/A')
             price = sm.get('top_price', 0) * 100
@@ -778,17 +750,15 @@ def get_agent_response(history, market_data):
     first_query = history[0]['content'] if history else ""
     is_cn = is_chinese_input(first_query)
     
-    # 1. Market Context (Using NEW Logic)
+    # 1. Market Context
     market_context = generate_market_context(market_data, is_cn)
     
-    # 2. 🔥 NEW: Perform Web Fact Check (To catch fake news)
-    # We use the user's original query to search for actual news articles
+    # 2. 🔥 Fact Check via Exa (Using cleaned up function)
     fact_check_info = verify_news_with_exa(first_query)
     
-    # Combine Fact Check + Market Data for the AI
     combined_context = f"{fact_check_info}\n\n{market_context}"
 
-    # 3. System Prompt (PM Mode - STRICTLY UNCHANGED TEXT, BUT WITH NEW DATA)
+    # 3. System Prompt (STRICTLY PRESERVED)
     if is_cn:
         system_prompt = f"""
         你是一位管理亿级美元资金的 **全球宏观对冲基金经理 (Global Macro PM)**。
@@ -1218,4 +1188,3 @@ if not st.session_state.messages and st.session_state.search_stage == "input":
             </a>
             """, unsafe_allow_html=True)
     st.markdown("<br><br>", unsafe_allow_html=True)
-
